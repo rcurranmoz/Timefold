@@ -7,11 +7,11 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		DB8F8D542F1FC13F001EF8D2 /* Timefold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Timefold.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DB0BBBD22F1FEBE900C9B414 /* Timefold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Timefold.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		DB8F8D562F1FC13F001EF8D2 /* Timefold */ = {
+		DB0BBBD42F1FEBE900C9B414 /* Timefold */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Timefold;
 			sourceTree = "<group>";
@@ -19,7 +19,7 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		DB8F8D512F1FC13F001EF8D2 /* Frameworks */ = {
+		DB0BBBCF2F1FEBE900C9B414 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -29,18 +29,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		DB8F8D4B2F1FC13F001EF8D2 = {
+		DB0BBBC92F1FEBE900C9B414 = {
 			isa = PBXGroup;
 			children = (
-				DB8F8D562F1FC13F001EF8D2 /* Timefold */,
-				DB8F8D552F1FC13F001EF8D2 /* Products */,
+				DB0BBBD42F1FEBE900C9B414 /* Timefold */,
+				DB0BBBD32F1FEBE900C9B414 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		DB8F8D552F1FC13F001EF8D2 /* Products */ = {
+		DB0BBBD32F1FEBE900C9B414 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				DB8F8D542F1FC13F001EF8D2 /* Timefold.app */,
+				DB0BBBD22F1FEBE900C9B414 /* Timefold.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,64 +48,64 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		DB8F8D532F1FC13F001EF8D2 /* Timefold */ = {
+		DB0BBBD12F1FEBE900C9B414 /* Timefold */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = DB8F8D5F2F1FC140001EF8D2 /* Build configuration list for PBXNativeTarget "Timefold" */;
+			buildConfigurationList = DB0BBBDD2F1FEBEA00C9B414 /* Build configuration list for PBXNativeTarget "Timefold" */;
 			buildPhases = (
-				DB8F8D502F1FC13F001EF8D2 /* Sources */,
-				DB8F8D512F1FC13F001EF8D2 /* Frameworks */,
-				DB8F8D522F1FC13F001EF8D2 /* Resources */,
+				DB0BBBCE2F1FEBE900C9B414 /* Sources */,
+				DB0BBBCF2F1FEBE900C9B414 /* Frameworks */,
+				DB0BBBD02F1FEBE900C9B414 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				DB8F8D562F1FC13F001EF8D2 /* Timefold */,
+				DB0BBBD42F1FEBE900C9B414 /* Timefold */,
 			);
 			name = Timefold;
 			packageProductDependencies = (
 			);
 			productName = Timefold;
-			productReference = DB8F8D542F1FC13F001EF8D2 /* Timefold.app */;
+			productReference = DB0BBBD22F1FEBE900C9B414 /* Timefold.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		DB8F8D4C2F1FC13F001EF8D2 /* Project object */ = {
+		DB0BBBCA2F1FEBE900C9B414 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
-					DB8F8D532F1FC13F001EF8D2 = {
+					DB0BBBD12F1FEBE900C9B414 = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
 			};
-			buildConfigurationList = DB8F8D4F2F1FC13F001EF8D2 /* Build configuration list for PBXProject "Timefold" */;
+			buildConfigurationList = DB0BBBCD2F1FEBE900C9B414 /* Build configuration list for PBXProject "Timefold" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
 			);
-			mainGroup = DB8F8D4B2F1FC13F001EF8D2;
+			mainGroup = DB0BBBC92F1FEBE900C9B414;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = DB8F8D552F1FC13F001EF8D2 /* Products */;
+			productRefGroup = DB0BBBD32F1FEBE900C9B414 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				DB8F8D532F1FC13F001EF8D2 /* Timefold */,
+				DB0BBBD12F1FEBE900C9B414 /* Timefold */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		DB8F8D522F1FC13F001EF8D2 /* Resources */ = {
+		DB0BBBD02F1FEBE900C9B414 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -115,7 +115,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		DB8F8D502F1FC13F001EF8D2 /* Sources */ = {
+		DB0BBBCE2F1FEBE900C9B414 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -125,7 +125,7 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		DB8F8D5D2F1FC140001EF8D2 /* Debug */ = {
+		DB0BBBDB2F1FEBEA00C9B414 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -160,7 +160,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = H5DZ392R8W;
+				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -189,7 +189,7 @@
 			};
 			name = Debug;
 		};
-		DB8F8D5E2F1FC140001EF8D2 /* Release */ = {
+		DB0BBBDC2F1FEBEA00C9B414 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -224,7 +224,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = H5DZ392R8W;
+				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -246,16 +246,18 @@
 			};
 			name = Release;
 		};
-		DB8F8D602F1FC140001EF8D2 /* Debug */ = {
+		DB0BBBDE2F1FEBEA00C9B414 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = H5DZ392R8W;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Timefold may save memories to your photo library if you chose.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold shows photos taken on today's date. Photos never leave your device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -265,8 +267,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold;
+				MARKETING_VERSION = 1.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold.iOS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -278,16 +280,18 @@
 			};
 			name = Debug;
 		};
-		DB8F8D612F1FC140001EF8D2 /* Release */ = {
+		DB0BBBDF2F1FEBEA00C9B414 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = H5DZ392R8W;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Timefold may save memories to your photo library if you chose.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold shows photos taken on today's date. Photos never leave your device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -297,8 +301,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold;
+				MARKETING_VERSION = 1.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold.iOS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -313,25 +317,25 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		DB8F8D4F2F1FC13F001EF8D2 /* Build configuration list for PBXProject "Timefold" */ = {
+		DB0BBBCD2F1FEBE900C9B414 /* Build configuration list for PBXProject "Timefold" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				DB8F8D5D2F1FC140001EF8D2 /* Debug */,
-				DB8F8D5E2F1FC140001EF8D2 /* Release */,
+				DB0BBBDB2F1FEBEA00C9B414 /* Debug */,
+				DB0BBBDC2F1FEBEA00C9B414 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		DB8F8D5F2F1FC140001EF8D2 /* Build configuration list for PBXNativeTarget "Timefold" */ = {
+		DB0BBBDD2F1FEBEA00C9B414 /* Build configuration list for PBXNativeTarget "Timefold" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				DB8F8D602F1FC140001EF8D2 /* Debug */,
-				DB8F8D612F1FC140001EF8D2 /* Release */,
+				DB0BBBDE2F1FEBEA00C9B414 /* Debug */,
+				DB0BBBDF2F1FEBEA00C9B414 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = DB8F8D4C2F1FC13F001EF8D2 /* Project object */;
+	rootObject = DB0BBBCA2F1FEBE900C9B414 /* Project object */;
 }

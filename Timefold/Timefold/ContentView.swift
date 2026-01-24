@@ -591,29 +591,70 @@ private struct MemoryPagerView: View {
     
     private func yearsAgoForStory(_ date: Date?) -> String {
         guard let date else { return "" }
-        let years = Calendar.current.dateComponents([.year], from: date, to: Date()).year ?? 0
-        if years <= 0 {
+        
+        // Calculate actual years elapsed
+        let calendar = Calendar.current
+        let now = Date()
+        
+        let dateYear = calendar.component(.year, from: date)
+        let nowYear = calendar.component(.year, from: now)
+        
+        let dateMonthDay = calendar.dateComponents([.month, .day], from: date)
+        let nowMonthDay = calendar.dateComponents([.month, .day], from: now)
+        
+        var yearsAgo = nowYear - dateYear
+        
+        if let dateMonth = dateMonthDay.month, let dateDay = dateMonthDay.day,
+           let nowMonth = nowMonthDay.month, let nowDay = nowMonthDay.day {
+            if nowMonth < dateMonth || (nowMonth == dateMonth && nowDay < dateDay) {
+                yearsAgo -= 1
+            }
+        }
+        
+        if yearsAgo <= 0 {
             return "Today"
-        } else if years == 1 {
+        } else if yearsAgo == 1 {
             return "1 year ago today"
         } else {
-            return "\(years) years ago today"
+            return "\(yearsAgo) years ago today"
         }
     }
 
     private func yearsAgoText(from date: Date?) -> String {
         guard let date else { return "" }
-        let years = Calendar.current.dateComponents([.year], from: date, to: Date()).year ?? 0
+        
+        // Calculate actual years elapsed, not just calendar year difference
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Get the year components
+        let dateYear = calendar.component(.year, from: date)
+        let nowYear = calendar.component(.year, from: now)
+        
+        // Calculate if we've passed the anniversary this year
+        let dateMonthDay = calendar.dateComponents([.month, .day], from: date)
+        let nowMonthDay = calendar.dateComponents([.month, .day], from: now)
+        
+        var yearsAgo = nowYear - dateYear
+        
+        // If we haven't reached the anniversary yet this year, subtract 1
+        if let dateMonth = dateMonthDay.month, let dateDay = dateMonthDay.day,
+           let nowMonth = nowMonthDay.month, let nowDay = nowMonthDay.day {
+            if nowMonth < dateMonth || (nowMonth == dateMonth && nowDay < dateDay) {
+                yearsAgo -= 1
+            }
+        }
+        
         let df = DateFormatter()
         df.dateFormat = "MMM d, yyyy"
         let dateStr = df.string(from: date)
         
-        if years <= 0 {
+        if yearsAgo <= 0 {
             return dateStr
-        } else if years == 1 {
+        } else if yearsAgo == 1 {
             return "\(dateStr) • 1 year ago"
         } else {
-            return "\(dateStr) • \(years) years ago"
+            return "\(dateStr) • \(yearsAgo) years ago"
         }
     }
     
@@ -836,13 +877,32 @@ private struct PagedPhotoView: View {
     
     private func yearsAgoForStory(_ date: Date?) -> String {
         guard let date else { return "" }
-        let years = Calendar.current.dateComponents([.year], from: date, to: Date()).year ?? 0
-        if years <= 0 {
+        
+        // Calculate actual years elapsed
+        let calendar = Calendar.current
+        let now = Date()
+        
+        let dateYear = calendar.component(.year, from: date)
+        let nowYear = calendar.component(.year, from: now)
+        
+        let dateMonthDay = calendar.dateComponents([.month, .day], from: date)
+        let nowMonthDay = calendar.dateComponents([.month, .day], from: now)
+        
+        var yearsAgo = nowYear - dateYear
+        
+        if let dateMonth = dateMonthDay.month, let dateDay = dateMonthDay.day,
+           let nowMonth = nowMonthDay.month, let nowDay = nowMonthDay.day {
+            if nowMonth < dateMonth || (nowMonth == dateMonth && nowDay < dateDay) {
+                yearsAgo -= 1
+            }
+        }
+        
+        if yearsAgo <= 0 {
             return "Today"
-        } else if years == 1 {
+        } else if yearsAgo == 1 {
             return "1 year ago today"
         } else {
-            return "\(years) years ago today"
+            return "\(yearsAgo) years ago today"
         }
     }
 }

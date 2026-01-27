@@ -86,23 +86,13 @@ struct ContentView: View {
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        // View mode toggle
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                viewMode = viewMode == .grid ? .fullscreen : .grid
-                            }
-                        } label: {
-                            Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
+                    // View mode toggle
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            viewMode = viewMode == .grid ? .fullscreen : .grid
                         }
-                        
-                        // Refresh button
-                        Button {
-                            model.reload()
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .disabled(model.state == .loading)
+                    } label: {
+                        Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
                     }
                 }
             }
@@ -183,17 +173,51 @@ private struct MemoriesGridView: View {
     @State private var deletedAssets: Set<String> = []
     @State private var assetToDelete: PHAsset?
     @State private var showingDeleteAlert = false
+    @State private var visibleYear: Int?
+    @State private var showYear = false
+    @State private var hideYearTask: DispatchWorkItem?
+    @State private var lastYearUpdate: Date = .distantPast
+    
+    init(assets: [PHAsset]) {
+        self.assets = assets
+        // Initialize to first year
+        if let firstAsset = assets.first,
+           let date = firstAsset.creationDate {
+            let year = Calendar.current.component(.year, from: date)
+            _visibleYear = State(initialValue: year)
+        }
+    }
 
     var body: some View {
-        gridContent
-            .alert("Delete Photo?", isPresented: $showingDeleteAlert, presenting: assetToDelete) { asset in
-                Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) {
-                    deletePhoto(asset: asset)
+        ZStack {
+            gridContent
+            
+            // Floating year indicator
+            if showYear, let year = visibleYear {
+                VStack {
+                    Spacer()
+                    Text(String(year))
+                        .font(.system(size: 28, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
+                        .transition(.opacity)
+                        .animation(.easeInOut(duration: 0.5), value: showYear)
                 }
-            } message: { asset in
-                deleteMessage(for: asset)
+                .padding(.bottom, 80)
             }
+        }
+        .alert("Delete Photo?", isPresented: $showingDeleteAlert, presenting: assetToDelete) { asset in
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deletePhoto(asset: asset)
+            }
+        } message: { asset in
+            deleteMessage(for: asset)
+        }
     }
     
     private var gridContent: some View {
@@ -201,29 +225,103 @@ private struct MemoriesGridView: View {
             let cell = (geo.size.width - spacing * 2) / 3
             
             ScrollView {
-                gridItems(cellSize: cell)
+                LazyVGrid(columns: columns, spacing: spacing) {
+                    ForEach(assets, id: \.localIdentifier) { asset in
+                        if !deletedAssets.contains(asset.localIdentifier) {
+                            GridCellView(
+                                assets: assets,
+                                asset: asset,
+                                cellSize: cell,
+                                onDelete: {
+                                    assetToDelete = asset
+                                    showingDeleteAlert = true
+                                }
+                            )
+                            .background(
+                                GeometryReader { itemGeo in
+                                    Color.clear
+                                        .onChange(of: itemGeo.frame(in: .named("scroll")).minY) { _ in
+                                            let frame = itemGeo.frame(in: .named("scroll"))
+                                            updateVisibleYear(for: asset, frame: frame, in: geo.size.height)
+                                        }
+                                        .onAppear {
+                                            let frame = itemGeo.frame(in: .named("scroll"))
+                                            updateVisibleYear(for: asset, frame: frame, in: geo.size.height)
+                                        }
+                                }
+                            )
+                        }
+                    }
+                }
+                .padding(.horizontal, 0)
             }
+            .coordinateSpace(name: "scroll")
             .scrollIndicators(.hidden)
         }
     }
     
-    private func gridItems(cellSize: CGFloat) -> some View {
-        LazyVGrid(columns: columns, spacing: spacing) {
-            ForEach(assets, id: \.localIdentifier) { asset in
-                if !deletedAssets.contains(asset.localIdentifier) {
-                    GridCellView(
-                        assets: assets,
-                        asset: asset,
-                        cellSize: cellSize,
-                        onDelete: {
-                            assetToDelete = asset
-                            showingDeleteAlert = true
+    private func updateVisibleYear(for asset: PHAsset, frame: CGRect, in viewHeight: CGFloat) {
+        // Check if item is near the TOP of the screen (first 20% of viewport)
+        let topZone = viewHeight * 0.2
+        
+        if frame.minY >= 0 && frame.minY <= topZone {
+            if let date = asset.creationDate {
+                let year = Calendar.current.component(.year, from: date)
+                
+                // If year changed, throttle updates to prevent glitchiness
+                if visibleYear != year {
+                    let now = Date()
+                    let timeSinceLastUpdate = now.timeIntervalSince(lastYearUpdate)
+                    
+                    // Only update if enough time has passed (0.5 seconds)
+                    guard timeSinceLastUpdate > 0.5 else { return }
+                    
+                    lastYearUpdate = now
+                    
+                    // Gentle fade out
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        showYear = false
+                    }
+                    
+                    // Update year and fade in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        visibleYear = year
+                        withAnimation(.easeInOut(duration: 0.4)) {
+                            showYear = true
                         }
-                    )
+                        
+                        // Cancel existing hide task
+                        hideYearTask?.cancel()
+                        
+                        // Schedule new hide task
+                        let task = DispatchWorkItem {
+                            withAnimation(.easeInOut(duration: 0.5)) {
+                                showYear = false
+                            }
+                        }
+                        hideYearTask = task
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: task)
+                    }
+                } else if !showYear {
+                    // Just show the year if it's not currently visible
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        showYear = true
+                    }
+                    
+                    // Cancel existing hide task
+                    hideYearTask?.cancel()
+                    
+                    // Schedule new hide task
+                    let task = DispatchWorkItem {
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            showYear = false
+                        }
+                    }
+                    hideYearTask = task
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: task)
                 }
             }
         }
-        .padding(.horizontal, 0)
     }
     
     private func deleteMessage(for asset: PHAsset) -> Text {
@@ -347,7 +445,7 @@ private struct MemoryPagerView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color(uiColor: .systemBackground).ignoresSafeArea()
 
             TabView(selection: $selection) {
                 ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
@@ -437,21 +535,39 @@ private struct MemoryPagerView: View {
             .opacity(dragOffset > 20 ? 0 : 1)
             .animation(.easeInOut(duration: 0.2), value: dragOffset)
         }
-        .navigationBarBackButtonHidden(true)
+        .navigationBarBackButtonHidden(false)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .principal) {
+                // Empty - just to maintain spacing
+                Text("")
+            }
+            
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                // Only show grid button when navigated (not when toggled from main view)
+                if onDismiss == nil {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "square.grid.3x3.fill")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+                    }
+                    .opacity(dragOffset > 20 ? 0 : 1)
+                }
+                
                 Button {
                     showingShare = true
                 } label: {
                     Image(systemName: "square.and.arrow.up")
-                        .foregroundStyle(.white)
-                        .fontWeight(.medium)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
                 }
                 .disabled(currentImage == nil)
                 .opacity(dragOffset > 20 ? 0 : 1)
             }
         }
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .onAppear {
             if let i = assets.firstIndex(where: { $0.localIdentifier == startAsset.localIdentifier }) {
                 selection = i
@@ -980,13 +1096,16 @@ final class MemoriesViewModel: ObservableObject {
         let results = PHAsset.fetchAssets(with: fetchOptions)
 
         var assets: [PHAsset] = []
-        results.enumerateObjects { asset, _, _ in
-            guard let date = asset.creationDate else { return }
+        
+        // Iterate in order to preserve the sort
+        for i in 0..<results.count {
+            let asset = results.object(at: i)
+            guard let date = asset.creationDate else { continue }
             let aDay = calendar.component(.day, from: date)
             let aMonth = calendar.component(.month, from: date)
             let aYear = calendar.component(.year, from: date)
 
-            guard aYear < currentYear else { return }
+            guard aYear < currentYear else { continue }
 
             if aDay == day && aMonth == month {
                 assets.append(asset)
@@ -994,6 +1113,16 @@ final class MemoriesViewModel: ObservableObject {
         }
 
         DispatchQueue.main.async {
+            // Debug: print first few years
+            if !assets.isEmpty {
+                print("📅 First asset year:", Calendar.current.component(.year, from: assets.first?.creationDate ?? Date()))
+                if assets.count > 1 {
+                    print("📅 Second asset year:", Calendar.current.component(.year, from: assets[1].creationDate ?? Date()))
+                }
+                if assets.count > 2 {
+                    print("📅 Third asset year:", Calendar.current.component(.year, from: assets[2].creationDate ?? Date()))
+                }
+            }
             self.state = assets.isEmpty ? .empty : .loaded(assets)
         }
     }
@@ -1018,6 +1147,14 @@ private struct ActivityView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Scroll Tracking
+private struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
 
 // Safe array subscript extension

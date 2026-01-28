@@ -2,10 +2,13 @@ import SwiftUI
 import Photos
 import Combine
 import UIKit
+import UserNotifications
 
 struct ContentView: View {
     @StateObject private var model = MemoriesViewModel()
+    @StateObject private var notificationManager = NotificationManager()
     @State private var viewMode: ViewMode = .grid
+    @State private var showingSettings = false
     
     enum ViewMode {
         case grid
@@ -85,6 +88,14 @@ struct ContentView: View {
                     }
                 }
                 
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
+                
                 ToolbarItem(placement: .topBarTrailing) {
                     // View mode toggle
                     Button {
@@ -99,6 +110,9 @@ struct ContentView: View {
         }
         .task {
             model.start()
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(notificationManager: notificationManager)
         }
     }
     
@@ -1154,6 +1168,185 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+// MARK: - Notification Manager
+class NotificationManager: ObservableObject {
+    @Published var isEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isEnabled, forKey: "notificationsEnabled")
+            if isEnabled {
+                requestPermission()
+            } else {
+                cancelNotifications()
+            }
+        }
+    }
+    
+    @Published var notificationTime: Date {
+        didSet {
+            UserDefaults.standard.set(notificationTime, forKey: "notificationTime")
+            if isEnabled {
+                scheduleNotificationCheck()
+            }
+        }
+    }
+    
+    @Published var minimumPhotos: Int {
+        didSet {
+            UserDefaults.standard.set(minimumPhotos, forKey: "minimumPhotos")
+            if isEnabled {
+                scheduleNotificationCheck()
+            }
+        }
+    }
+    
+    init() {
+        self.isEnabled = UserDefaults.standard.bool(forKey: "notificationsEnabled")
+        
+        if let savedTime = UserDefaults.standard.object(forKey: "notificationTime") as? Date {
+            self.notificationTime = savedTime
+        } else {
+            // Default to 9:00 AM
+            var components = DateComponents()
+            components.hour = 9
+            components.minute = 0
+            self.notificationTime = Calendar.current.date(from: components) ?? Date()
+        }
+        
+        let savedMinimum = UserDefaults.standard.integer(forKey: "minimumPhotos")
+        self.minimumPhotos = savedMinimum > 0 ? savedMinimum : 3
+        
+        if isEnabled {
+            scheduleNotificationCheck()
+        }
+    }
+    
+    func requestPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            DispatchQueue.main.async {
+                if granted {
+                    self.scheduleNotificationCheck()
+                } else {
+                    self.isEnabled = false
+                }
+            }
+        }
+    }
+    
+    func scheduleNotificationCheck() {
+        cancelNotifications()
+        
+        // Schedule a daily notification at the user's chosen time
+        let components = Calendar.current.dateComponents([.hour, .minute], from: notificationTime)
+        
+        var dateComponents = DateComponents()
+        dateComponents.hour = components.hour
+        dateComponents.minute = components.minute
+        
+        // This will fire daily at the chosen time
+        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+        
+        // Elegant notification variations
+        let notifications = [
+            ("Your memories are ready", "Photos from this day in past years"),
+            ("Time to look back", "See what you were up to today"),
+            ("Memories from this day", "Tap to revisit the past"),
+            ("Your past awaits", "Photos from years ago are waiting"),
+            ("Ready to revisit today?", "See how this day looked before"),
+            ("Take a moment to look back", "Your photos from this day"),
+            ("What were you doing on this day?", "Find out in your memories"),
+            ("See what you were up to", "Photos from this day over the years")
+        ]
+        
+        let notification = notifications.randomElement() ?? notifications[0]
+        
+        let content = UNMutableNotificationContent()
+        content.title = notification.0
+        content.body = notification.1
+        content.sound = .default
+        
+        let request = UNNotificationRequest(
+            identifier: "dailyMemoriesCheck",
+            content: content,
+            trigger: trigger
+        )
+        
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("Error scheduling notification: \(error)")
+            }
+        }
+    }
+    
+    func cancelNotifications() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: ["dailyMemoriesCheck"]
+        )
+        UNUserNotificationCenter.current().removeDeliveredNotifications(
+            withIdentifiers: ["dailyMemoriesCheck"]
+        )
+    }
+    
+    private func todayString() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM d"
+        return formatter.string(from: Date())
+    }
+}
+
+// MARK: - Settings View
+struct SettingsView: View {
+    @ObservedObject var notificationManager: NotificationManager
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("Daily Reminder", isOn: $notificationManager.isEnabled)
+                    
+                    if notificationManager.isEnabled {
+                        DatePicker(
+                            "Time",
+                            selection: $notificationManager.notificationTime,
+                            displayedComponents: .hourAndMinute
+                        )
+                        
+                        Picker("Minimum Photos", selection: $notificationManager.minimumPhotos) {
+                            Text("3 photos").tag(3)
+                            Text("5 photos").tag(5)
+                            Text("10 photos").tag(10)
+                        }
+                    }
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("Get a notification each morning if you have memories to see today.")
+                }
+                
+                Section {
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text("1.2")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("About")
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
 }
 

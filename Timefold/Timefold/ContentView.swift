@@ -1161,6 +1161,7 @@ final class MemoriesViewModel: ObservableObject {
         }
 
         DispatchQueue.main.async {
+            SharedMemoriesManager.shared.saveMemoryCount(assets.count)
             self.state = assets.isEmpty ? .empty : .loaded(assets)
         }
     }

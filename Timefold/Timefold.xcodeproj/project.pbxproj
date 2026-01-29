@@ -6,14 +6,69 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		DBDD32852F2BE58300DF414F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DBDD32842F2BE58300DF414F /* WidgetKit.framework */; };
+		DBDD32872F2BE58300DF414F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DBDD32862F2BE58300DF414F /* SwiftUI.framework */; };
+		DBDD32962F2BE58400DF414F /* TimefoldWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DBDD32822F2BE58300DF414F /* TimefoldWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DBDD32A12F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */; };
+		DBDD32A22F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		DBDD32942F2BE58400DF414F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DB0BBBCA2F1FEBE900C9B414 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DBDD32812F2BE58300DF414F;
+			remoteInfo = TimefoldWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DBDD32972F2BE58400DF414F /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DBDD32962F2BE58400DF414F /* TimefoldWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		DB0BBBD22F1FEBE900C9B414 /* Timefold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Timefold.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DBDD32822F2BE58300DF414F /* TimefoldWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TimefoldWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		DBDD32842F2BE58300DF414F /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		DBDD32862F2BE58300DF414F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		DBDD329D2F2BE6F200DF414F /* TimefoldWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TimefoldWidgetExtension.entitlements; sourceTree = "<group>"; };
+		DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedMemoriesManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		DBDD329A2F2BE58400DF414F /* Exceptions for "TimefoldWidget" folder in "TimefoldWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = DBDD32812F2BE58300DF414F /* TimefoldWidgetExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		DB0BBBD42F1FEBE900C9B414 /* Timefold */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Timefold;
+			sourceTree = "<group>";
+		};
+		DBDD32882F2BE58300DF414F /* TimefoldWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				DBDD329A2F2BE58400DF414F /* Exceptions for "TimefoldWidget" folder in "TimefoldWidgetExtension" target */,
+			);
+			path = TimefoldWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -26,13 +81,26 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DBDD327F2F2BE58300DF414F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DBDD32872F2BE58300DF414F /* SwiftUI.framework in Frameworks */,
+				DBDD32852F2BE58300DF414F /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		DB0BBBC92F1FEBE900C9B414 = {
 			isa = PBXGroup;
 			children = (
+				DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */,
+				DBDD329D2F2BE6F200DF414F /* TimefoldWidgetExtension.entitlements */,
 				DB0BBBD42F1FEBE900C9B414 /* Timefold */,
+				DBDD32882F2BE58300DF414F /* TimefoldWidget */,
+				DBDD32832F2BE58300DF414F /* Frameworks */,
 				DB0BBBD32F1FEBE900C9B414 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,8 +109,18 @@
 			isa = PBXGroup;
 			children = (
 				DB0BBBD22F1FEBE900C9B414 /* Timefold.app */,
+				DBDD32822F2BE58300DF414F /* TimefoldWidgetExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		DBDD32832F2BE58300DF414F /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				DBDD32842F2BE58300DF414F /* WidgetKit.framework */,
+				DBDD32862F2BE58300DF414F /* SwiftUI.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -55,10 +133,12 @@
 				DB0BBBCE2F1FEBE900C9B414 /* Sources */,
 				DB0BBBCF2F1FEBE900C9B414 /* Frameworks */,
 				DB0BBBD02F1FEBE900C9B414 /* Resources */,
+				DBDD32972F2BE58400DF414F /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				DBDD32952F2BE58400DF414F /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				DB0BBBD42F1FEBE900C9B414 /* Timefold */,
@@ -69,6 +149,28 @@
 			productName = Timefold;
 			productReference = DB0BBBD22F1FEBE900C9B414 /* Timefold.app */;
 			productType = "com.apple.product-type.application";
+		};
+		DBDD32812F2BE58300DF414F /* TimefoldWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DBDD329B2F2BE58400DF414F /* Build configuration list for PBXNativeTarget "TimefoldWidgetExtension" */;
+			buildPhases = (
+				DBDD327E2F2BE58300DF414F /* Sources */,
+				DBDD327F2F2BE58300DF414F /* Frameworks */,
+				DBDD32802F2BE58300DF414F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				DBDD32882F2BE58300DF414F /* TimefoldWidget */,
+			);
+			name = TimefoldWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = TimefoldWidgetExtension;
+			productReference = DBDD32822F2BE58300DF414F /* TimefoldWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -81,6 +183,9 @@
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					DB0BBBD12F1FEBE900C9B414 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					DBDD32812F2BE58300DF414F = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
@@ -100,12 +205,20 @@
 			projectRoot = "";
 			targets = (
 				DB0BBBD12F1FEBE900C9B414 /* Timefold */,
+				DBDD32812F2BE58300DF414F /* TimefoldWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		DB0BBBD02F1FEBE900C9B414 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBDD32802F2BE58300DF414F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -119,10 +232,27 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DBDD32A12F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBDD327E2F2BE58300DF414F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DBDD32A22F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		DBDD32952F2BE58400DF414F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DBDD32812F2BE58300DF414F /* TimefoldWidgetExtension */;
+			targetProxy = DBDD32942F2BE58400DF414F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		DB0BBBDB2F1FEBEA00C9B414 /* Debug */ = {
@@ -251,6 +381,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Timefold/Timefold.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
@@ -285,6 +416,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Timefold/Timefold.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
@@ -314,6 +446,70 @@
 			};
 			name = Release;
 		};
+		DBDD32982F2BE58400DF414F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = TimefoldWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KA6H3Z2C59;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TimefoldWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = TimefoldWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold widget neesd access to show your memories";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold.iOS.TimefoldWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DBDD32992F2BE58400DF414F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = TimefoldWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KA6H3Z2C59;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TimefoldWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = TimefoldWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold widget neesd access to show your memories";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold.iOS.TimefoldWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -331,6 +527,15 @@
 			buildConfigurations = (
 				DB0BBBDE2F1FEBEA00C9B414 /* Debug */,
 				DB0BBBDF2F1FEBEA00C9B414 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DBDD329B2F2BE58400DF414F /* Build configuration list for PBXNativeTarget "TimefoldWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DBDD32982F2BE58400DF414F /* Debug */,
+				DBDD32992F2BE58400DF414F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

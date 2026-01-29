@@ -9,6 +9,8 @@ struct ContentView: View {
     @StateObject private var notificationManager = NotificationManager()
     @State private var viewMode: ViewMode = .grid
     @State private var showingSettings = false
+    @State private var showingDatePicker = false
+    @State private var selectedDate = Date()
     
     enum ViewMode {
         case grid
@@ -82,9 +84,22 @@ struct ContentView: View {
                                     )
                                 )
                         }
-                        Text(todayDateString())
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text(formatDateString(selectedDate))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            
+                            if !Calendar.current.isDateInToday(selectedDate) {
+                                Button {
+                                    selectedDate = Date()
+                                    model.loadMemoriesFor(date: Date())
+                                } label: {
+                                    Text("• Today")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -97,13 +112,22 @@ struct ContentView: View {
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {
-                    // View mode toggle
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            viewMode = viewMode == .grid ? .fullscreen : .grid
+                    HStack(spacing: 16) {
+                        // Calendar picker
+                        Button {
+                            showingDatePicker = true
+                        } label: {
+                            Image(systemName: "calendar")
                         }
-                    } label: {
-                        Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
+                        
+                        // View mode toggle
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                viewMode = viewMode == .grid ? .fullscreen : .grid
+                            }
+                        } label: {
+                            Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
+                        }
                     }
                 }
             }
@@ -114,12 +138,18 @@ struct ContentView: View {
         .sheet(isPresented: $showingSettings) {
             SettingsView(notificationManager: notificationManager)
         }
+        .sheet(isPresented: $showingDatePicker) {
+            DatePickerView(selectedDate: $selectedDate, onDateSelected: {
+                model.loadMemoriesFor(date: selectedDate)
+                showingDatePicker = false
+            })
+        }
     }
     
-    private func todayDateString() -> String {
+    private func formatDateString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM d"
-        return formatter.string(from: Date())
+        return formatter.string(from: date)
     }
 }
 
@@ -1095,13 +1125,16 @@ final class MemoriesViewModel: ObservableObject {
     }
 
     private func loadOnThisDay() {
+        loadMemoriesFor(date: Date())
+    }
+    
+    func loadMemoriesFor(date: Date) {
         state = .loading
 
         let calendar = Calendar.current
-        let now = Date()
-        let day = calendar.component(.day, from: now)
-        let month = calendar.component(.month, from: now)
-        let currentYear = calendar.component(.year, from: now)
+        let day = calendar.component(.day, from: date)
+        let month = calendar.component(.month, from: date)
+        let selectedYear = calendar.component(.year, from: date)
 
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
@@ -1114,12 +1147,13 @@ final class MemoriesViewModel: ObservableObject {
         // Iterate in order to preserve the sort
         for i in 0..<results.count {
             let asset = results.object(at: i)
-            guard let date = asset.creationDate else { continue }
-            let aDay = calendar.component(.day, from: date)
-            let aMonth = calendar.component(.month, from: date)
-            let aYear = calendar.component(.year, from: date)
+            guard let assetDate = asset.creationDate else { continue }
+            let aDay = calendar.component(.day, from: assetDate)
+            let aMonth = calendar.component(.month, from: assetDate)
+            let aYear = calendar.component(.year, from: assetDate)
 
-            guard aYear < currentYear else { continue }
+            // Skip photos from the selected year and future years
+            guard aYear < selectedYear else { continue }
 
             if aDay == day && aMonth == month {
                 assets.append(asset)
@@ -1127,16 +1161,6 @@ final class MemoriesViewModel: ObservableObject {
         }
 
         DispatchQueue.main.async {
-            // Debug: print first few years
-            if !assets.isEmpty {
-                print("📅 First asset year:", Calendar.current.component(.year, from: assets.first?.creationDate ?? Date()))
-                if assets.count > 1 {
-                    print("📅 Second asset year:", Calendar.current.component(.year, from: assets[1].creationDate ?? Date()))
-                }
-                if assets.count > 2 {
-                    print("📅 Third asset year:", Calendar.current.component(.year, from: assets[2].creationDate ?? Date()))
-                }
-            }
             self.state = assets.isEmpty ? .empty : .loaded(assets)
         }
     }
@@ -1296,6 +1320,66 @@ class NotificationManager: ObservableObject {
     }
 }
 
+// MARK: - Date Picker View
+struct DatePickerView: View {
+    @Binding var selectedDate: Date
+    let onDateSelected: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Text("Jump to a date")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .padding(.top, 32)
+                
+                Text("See photos from this day in past years")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                
+                DatePicker(
+                    "Select Date",
+                    selection: $selectedDate,
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+                .padding()
+                
+                Spacer()
+                
+                Button {
+                    onDateSelected()
+                } label: {
+                    Text("Show Memories")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(
+                            LinearGradient(
+                                colors: [.orange, .pink],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .padding(.horizontal, 32)
+                .padding(.bottom, 32)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Settings View
 struct SettingsView: View {
     @ObservedObject var notificationManager: NotificationManager
@@ -1330,7 +1414,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.2")
+                        Text("1.1.6")
                             .foregroundStyle(.secondary)
                     }
                 } header: {

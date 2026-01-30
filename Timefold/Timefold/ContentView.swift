@@ -3,6 +3,7 @@ import Photos
 import Combine
 import UIKit
 import UserNotifications
+import WidgetKit
 
 struct ContentView: View {
     @StateObject private var model = MemoriesViewModel()
@@ -113,11 +114,13 @@ struct ContentView: View {
                 
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
-                        // Calendar picker
-                        Button {
-                            showingDatePicker = true
-                        } label: {
-                            Image(systemName: "calendar")
+                        // Calendar picker - only in grid view
+                        if viewMode == .grid {
+                            Button {
+                                showingDatePicker = true
+                            } label: {
+                                Image(systemName: "calendar")
+                            }
                         }
                         
                         // View mode toggle
@@ -134,6 +137,15 @@ struct ContentView: View {
         }
         .task {
             model.start()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // Reload when app comes to foreground (in case date changed)
+            model.loadMemoriesFor(date: selectedDate)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            // Reload when system time/date changes (like manual date change)
+            selectedDate = Date()
+            model.loadMemoriesFor(date: Date())
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView(notificationManager: notificationManager)
@@ -301,6 +313,7 @@ private struct MemoriesGridView: View {
             }
             .coordinateSpace(name: "scroll")
             .scrollIndicators(.hidden)
+            .ignoresSafeArea(edges: .bottom)
         }
     }
     
@@ -628,13 +641,22 @@ private struct MemoryPagerView: View {
                 ActivityView(activityItems: ["Memory"])
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            // Dismiss share sheet when returning from Instagram
+            if showingShare {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    showingShare = false
+                }
+            }
+        }
     }
     
     private func createStoryImage(from image: UIImage, asset: PHAsset) -> UIImage? {
         // Create a canvas sized for Instagram stories (9:16 aspect ratio)
-        let storySize = CGSize(width: 720, height: 1280)
+        // Using smaller size for better compatibility
+        let storySize = CGSize(width: 1080, height: 1920)  // Instagram's preferred size
         
-        let renderer = UIGraphicsImageRenderer(size: storySize)
+        let renderer = UIGraphicsImageRenderer(size: storySize, format: UIGraphicsImageRendererFormat.default())
         
         let storyImage = renderer.image { context in
             let ctx = context.cgContext
@@ -660,8 +682,8 @@ private struct MemoryPagerView: View {
             )
             
             // Calculate photo placement (centered, with padding)
-            let maxPhotoWidth = storySize.width - 120
-            let maxPhotoHeight = storySize.height - 400
+            let maxPhotoWidth = storySize.width - 180
+            let maxPhotoHeight = storySize.height - 600
             
             let imageAspect = image.size.width / image.size.height
             let photoRect: CGRect
@@ -672,7 +694,7 @@ private struct MemoryPagerView: View {
                 let height = width / imageAspect
                 photoRect = CGRect(
                     x: (storySize.width - width) / 2,
-                    y: 200,
+                    y: 300,
                     width: width,
                     height: height
                 )
@@ -682,16 +704,16 @@ private struct MemoryPagerView: View {
                 let width = height * imageAspect
                 photoRect = CGRect(
                     x: (storySize.width - width) / 2,
-                    y: 200,
+                    y: 300,
                     width: width,
                     height: height
                 )
             }
             
             // Draw white border around photo
-            let borderRect = photoRect.insetBy(dx: -20, dy: -20)
+            let borderRect = photoRect.insetBy(dx: -30, dy: -30)
             ctx.setFillColor(UIColor.white.cgColor)
-            ctx.setShadow(offset: CGSize(width: 0, height: 10), blur: 30, color: UIColor.black.withAlphaComponent(0.3).cgColor)
+            ctx.setShadow(offset: CGSize(width: 0, height: 15), blur: 45, color: UIColor.black.withAlphaComponent(0.3).cgColor)
             ctx.fill(borderRect)
             ctx.setShadow(offset: .zero, blur: 0, color: nil)
             
@@ -702,39 +724,68 @@ private struct MemoryPagerView: View {
             let dateText = formattedDateForStory(asset.creationDate)
             let yearsText = yearsAgoForStory(asset.creationDate)
             
-            // App name at top
-            let appNameAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 32, weight: .bold),
-                .foregroundColor: UIColor.white
-            ]
-            let appName = "Timefold" as NSString
-            let appNameSize = appName.size(withAttributes: appNameAttrs)
-            appName.draw(
-                at: CGPoint(x: (storySize.width - appNameSize.width) / 2, y: 80),
-                withAttributes: appNameAttrs
-            )
+            // Logo + Wordmark at top (centered, bold, with shadow)
+            let iconSize: CGFloat = 50
+            let iconY: CGFloat = 90
+            let spacing: CGFloat = 16
+            
+            // Draw white clock icon with shadow
+            let iconConfig = UIImage.SymbolConfiguration(pointSize: iconSize, weight: .bold)
+            if let clockIcon = UIImage(systemName: "clock.arrow.circlepath", withConfiguration: iconConfig)?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+                
+                // Calculate wordmark size
+                let wordmarkAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 52, weight: .bold),
+                    .foregroundColor: UIColor.white
+                ]
+                let wordmark = "Timefold" as NSString
+                let wordmarkSize = wordmark.size(withAttributes: wordmarkAttrs)
+                
+                // Calculate total width for centering
+                let totalWidth = iconSize + spacing + wordmarkSize.width
+                let startX = (storySize.width - totalWidth) / 2
+                
+                // Add shadow for depth
+                ctx.setShadow(
+                    offset: CGSize(width: 0, height: 4),
+                    blur: 12,
+                    color: UIColor.black.withAlphaComponent(0.4).cgColor
+                )
+                
+                // Draw icon
+                clockIcon.draw(in: CGRect(x: startX, y: iconY, width: iconSize, height: iconSize))
+                
+                // Draw wordmark
+                wordmark.draw(
+                    at: CGPoint(x: startX + iconSize + spacing, y: iconY + (iconSize - wordmarkSize.height) / 2),
+                    withAttributes: wordmarkAttrs
+                )
+                
+                // Clear shadow
+                ctx.setShadow(offset: .zero, blur: 0, color: nil)
+            }
             
             // Date text
             let dateAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 48, weight: .bold),
+                .font: UIFont.systemFont(ofSize: 72, weight: .bold),
                 .foregroundColor: UIColor.white
             ]
             let dateString = dateText as NSString
             let dateSize = dateString.size(withAttributes: dateAttrs)
             dateString.draw(
-                at: CGPoint(x: (storySize.width - dateSize.width) / 2, y: photoRect.maxY + 50),
+                at: CGPoint(x: (storySize.width - dateSize.width) / 2, y: photoRect.maxY + 75),
                 withAttributes: dateAttrs
             )
             
             // Years ago text
             let yearsAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 36, weight: .medium),
+                .font: UIFont.systemFont(ofSize: 54, weight: .medium),
                 .foregroundColor: UIColor.white.withAlphaComponent(0.9)
             ]
             let yearsString = yearsText as NSString
             let yearsSize = yearsString.size(withAttributes: yearsAttrs)
             yearsString.draw(
-                at: CGPoint(x: (storySize.width - yearsSize.width) / 2, y: photoRect.maxY + 110),
+                at: CGPoint(x: (storySize.width - yearsSize.width) / 2, y: photoRect.maxY + 165),
                 withAttributes: yearsAttrs
             )
         }
@@ -1161,8 +1212,18 @@ final class MemoriesViewModel: ObservableObject {
         }
 
         DispatchQueue.main.async {
-            SharedMemoriesManager.shared.saveMemoryCount(assets.count)
             self.state = assets.isEmpty ? .empty : .loaded(assets)
+            
+            // Save for widget
+            if !assets.isEmpty {
+                SharedMemoriesManager.shared.saveMemoryCount(assets.count)
+                if let randomAsset = assets.randomElement() {
+                    SharedMemoriesManager.shared.saveWidgetThumbnail(from: randomAsset)
+                }
+                
+                // Tell widget to reload
+                WidgetCenter.shared.reloadAllTimelines()
+            }
         }
     }
 }
@@ -1179,8 +1240,11 @@ private struct ActivityView: UIViewControllerRepresentable {
             applicationActivities: applicationActivities
         )
         controller.excludedActivityTypes = excludedActivityTypes
-        controller.completionWithItemsHandler = { _, _, _, _ in
-            presentationMode.wrappedValue.dismiss()
+        controller.completionWithItemsHandler = { activityType, completed, returnedItems, error in
+            // Always dismiss the sheet, regardless of outcome
+            DispatchQueue.main.async {
+                presentationMode.wrappedValue.dismiss()
+            }
         }
         return controller
     }
@@ -1415,7 +1479,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.1.6")
+                        Text("1.1.7")
                             .foregroundStyle(.secondary)
                     }
                 } header: {

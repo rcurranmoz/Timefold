@@ -5,13 +5,13 @@ struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> SimpleEntry {
         SimpleEntry(date: Date(), count: 0)
     }
-
+    
     func getSnapshot(in context: Context, completion: @escaping (SimpleEntry) -> ()) {
         let count = SharedMemoriesManager.shared.readMemoryCount()
         let entry = SimpleEntry(date: Date(), count: count)
         completion(entry)
     }
-
+    
     func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> ()) {
         let count = SharedMemoriesManager.shared.readMemoryCount()
         let currentDate = Date()
@@ -31,32 +31,88 @@ struct SimpleEntry: TimelineEntry {
 
 struct TimefoldWidgetEntryView : View {
     var entry: Provider.Entry
+    @Environment(\.widgetFamily) var family
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.largeTitle)
-                .foregroundStyle(.white)
+        if family == .systemSmall {
+            SmallWidgetView(entry: entry)
+        } else {
+            MediumWidgetView(entry: entry)
+        }
+    }
+}
+
+struct SmallWidgetView: View {
+    let entry: SimpleEntry
+    
+    var body: some View {
+        ZStack {
+            // Soft dark gradient overlay for readability
+            VStack {
+                Spacer()
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.85)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 120)
+                .blur(radius: 20) // Soft edges
+            }
             
-            if entry.count > 0 {
-                Text("\(entry.count)")
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                
-                Text(entry.count == 1 ? "memory" : "memories")
-                    .font(.headline)
-                    .foregroundStyle(.white.opacity(0.9))
-                
-                Text("from today")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
-            } else {
-                Text("No memories")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                Text("from today")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+            // Content
+            VStack {
+                Spacer()
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(entry.count)")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        
+                        Text(entry.count == 1 ? "memory from today" : "memories from today")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                    Spacer()
+                }
+                .padding(14)
+            }
+        }
+    }
+}
+
+struct MediumWidgetView: View {
+    let entry: SimpleEntry
+    
+    var body: some View {
+        ZStack {
+            // Soft dark gradient overlay at bottom
+            VStack {
+                Spacer()
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.85)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 100)
+                .blur(radius: 20) // Soft edges
+            }
+            
+            // Count at bottom
+            VStack {
+                Spacer()
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(entry.count)")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        
+                        Text(entry.count == 1 ? "memory from today" : "memories from today")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                    Spacer()
+                }
+                .padding(14)
             }
         }
     }
@@ -69,15 +125,21 @@ struct TimefoldWidget: Widget {
         StaticConfiguration(kind: kind, provider: Provider()) { entry in
             TimefoldWidgetEntryView(entry: entry)
                 .containerBackground(for: .widget) {
-                    LinearGradient(
-                        colors: [.orange, .pink],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                    if let image = SharedMemoriesManager.shared.readWidgetThumbnail() {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        LinearGradient(
+                            colors: [.orange, .pink],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    }
                 }
         }
         .configurationDisplayName("Timefold")
         .description("See how many memories you have from today")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemMedium])
     }
 }

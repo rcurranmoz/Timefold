@@ -21,4 +21,30 @@ class SharedMemoriesManager {
         guard let countString = try? String(contentsOf: url, encoding: .utf8) else { return 0 }
         return Int(countString) ?? 0
     }
+    
+    // Save a random photo thumbnail for widget (called from main app)
+    func saveWidgetThumbnail(from asset: PHAsset) {
+        guard let url = containerURL?.appendingPathComponent("widgetPhoto.jpg") else { return }
+        
+        let imageManager = PHImageManager.default()
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat  // Better quality
+        options.isSynchronous = true
+        options.resizeMode = .exact  // Better sizing
+        
+        let targetSize = CGSize(width: 600, height: 600)  // Bigger for better quality
+        
+        imageManager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFill, options: options) { image, _ in
+            guard let image = image,
+                  let jpegData = image.jpegData(compressionQuality: 0.85) else { return }  // Higher quality
+            try? jpegData.write(to: url)
+        }
+    }
+    
+    // Read widget thumbnail (called from widget)
+    func readWidgetThumbnail() -> UIImage? {
+        guard let url = containerURL?.appendingPathComponent("widgetPhoto.jpg") else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return UIImage(data: data)
+    }
 }

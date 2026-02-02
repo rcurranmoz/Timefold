@@ -554,7 +554,8 @@ private struct MemoryPagerView: View {
                     .tag(index)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .tabViewStyle(.page(indexDisplayMode: currentAssetIsVideo ? .never : .automatic))
+            .indexViewStyle(.page(backgroundDisplayMode: .always))
             .offset(y: dragOffset)
             .opacity(opacity)
             .simultaneousGesture(

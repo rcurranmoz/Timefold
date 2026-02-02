@@ -4,6 +4,7 @@ import Combine
 import UIKit
 import UserNotifications
 import WidgetKit
+import AVKit
 
 struct ContentView: View {
     @StateObject private var model = MemoriesViewModel()
@@ -416,16 +417,46 @@ private struct GridCellView: View {
         NavigationLink {
             MemoryPagerView(assets: assets, startAsset: asset)
         } label: {
-            AssetThumbnailView(asset: asset)
-                .frame(width: cellSize, height: cellSize)
-                .clipped()
+            ZStack {
+                AssetThumbnailView(asset: asset)
+                    .frame(width: cellSize, height: cellSize)
+                    .clipped()
+                
+                // Video play icon overlay
+                if asset.mediaType == .video {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.5), radius: 2)
+                            
+                            // Video duration
+                            Text(formatDuration(asset.duration))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.5), radius: 2)
+                            
+                            Spacer()
+                        }
+                        .padding(6)
+                    }
+                }
+            }
         }
         .buttonStyle(.plain)
         .contextMenu {
             Button(role: .destructive, action: onDelete) {
-                Label("Delete Photo", systemImage: "trash")
+                Label(asset.mediaType == .video ? "Delete Video" : "Delete Photo", systemImage: "trash")
             }
         }
+    }
+    
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 
@@ -500,6 +531,10 @@ private struct MemoryPagerView: View {
         assets[safe: selection]
     }
 
+    private var currentAssetIsVideo: Bool {
+        assets[safe: selection]?.mediaType == .video
+    }
+
     var body: some View {
         ZStack {
             Color(uiColor: .systemBackground).ignoresSafeArea()
@@ -519,8 +554,7 @@ private struct MemoryPagerView: View {
                     .tag(index)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .automatic))
-            .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .tabViewStyle(.page(indexDisplayMode: .never))
             .offset(y: dragOffset)
             .opacity(opacity)
             .simultaneousGesture(
@@ -724,44 +758,35 @@ private struct MemoryPagerView: View {
             let dateText = formattedDateForStory(asset.creationDate)
             let yearsText = yearsAgoForStory(asset.creationDate)
             
-            // Logo + Wordmark at top (centered, bold, with shadow)
-            let iconSize: CGFloat = 50
-            let iconY: CGFloat = 90
-            let spacing: CGFloat = 16
+            // SIMPLE BOLD LOGO - no glitch, just works
+            let logoY: CGFloat = 100
             
-            // Draw white clock icon with shadow
-            let iconConfig = UIImage.SymbolConfiguration(pointSize: iconSize, weight: .bold)
-            if let clockIcon = UIImage(systemName: "clock.arrow.circlepath", withConfiguration: iconConfig)?.withTintColor(.white, renderingMode: .alwaysOriginal) {
-                
-                // Calculate wordmark size
-                let wordmarkAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 52, weight: .bold),
-                    .foregroundColor: UIColor.white
-                ]
-                let wordmark = "Timefold" as NSString
-                let wordmarkSize = wordmark.size(withAttributes: wordmarkAttrs)
-                
-                // Calculate total width for centering
-                let totalWidth = iconSize + spacing + wordmarkSize.width
-                let startX = (storySize.width - totalWidth) / 2
-                
-                // Add shadow for depth
-                ctx.setShadow(
-                    offset: CGSize(width: 0, height: 4),
-                    blur: 12,
-                    color: UIColor.black.withAlphaComponent(0.4).cgColor
-                )
-                
-                // Draw icon
-                clockIcon.draw(in: CGRect(x: startX, y: iconY, width: iconSize, height: iconSize))
-                
-                // Draw wordmark
-                wordmark.draw(
-                    at: CGPoint(x: startX + iconSize + spacing, y: iconY + (iconSize - wordmarkSize.height) / 2),
-                    withAttributes: wordmarkAttrs
-                )
-                
-                // Clear shadow
+            // Big bold "TIMEFOLD"
+            let textAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 72, weight: .black),
+                .foregroundColor: UIColor.white,
+                .strokeColor: UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 1.0),
+                .strokeWidth: -3.0
+            ]
+            let text = "TIMEFOLD" as NSString
+            let textSize = text.size(withAttributes: textAttrs)
+            let textX = (storySize.width - textSize.width) / 2
+            
+            // Draw with big shadow
+            ctx.setShadow(offset: CGSize(width: 0, height: 6), blur: 20, color: UIColor.black.withAlphaComponent(0.7).cgColor)
+            text.draw(at: CGPoint(x: textX, y: logoY), withAttributes: textAttrs)
+            ctx.setShadow(offset: .zero, blur: 0, color: nil)
+            
+            // Clock icon below
+            let iconSize: CGFloat = 55
+            let iconY = logoY + textSize.height + 20
+            let iconX = (storySize.width - iconSize) / 2
+            
+            let iconConfig = UIImage.SymbolConfiguration(pointSize: iconSize * 0.7, weight: .bold)
+            if let clockIcon = UIImage(systemName: "clock.arrow.circlepath", withConfiguration: iconConfig) {
+                let whiteIcon = clockIcon.withTintColor(.white, renderingMode: .alwaysOriginal)
+                ctx.setShadow(offset: CGSize(width: 0, height: 4), blur: 15, color: UIColor.black.withAlphaComponent(0.6).cgColor)
+                whiteIcon.draw(in: CGRect(x: iconX, y: iconY, width: iconSize, height: iconSize))
                 ctx.setShadow(offset: .zero, blur: 0, color: nil)
             }
             
@@ -891,67 +916,89 @@ private struct PagedPhotoView: View {
     @State private var image: UIImage?
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var player: AVPlayer?
+    @State private var isPlaying = false
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .scaleEffect(scale)
-                        .gesture(
-                            MagnifyGesture()
-                                .onChanged { value in
-                                    // Don't allow zoom while dismissing
-                                    guard dragOffset == 0 else { return }
-                                    scale = lastScale * value.magnification
-                                }
-                                .onEnded { _ in
-                                    withAnimation(.spring(response: 0.3)) {
-                                        if scale < 1.0 {
-                                            scale = 1.0
-                                        } else if scale > 4.0 {
-                                            scale = 4.0
+                if asset.mediaType == .video {
+                    // VIDEO VIEW
+                    if let player {
+                        VideoPlayer(player: player)
+                            .onAppear {
+                                // Load thumbnail for sharing
+                                onImageReady(image)
+                            }
+                    } else if let image {
+                        // Show thumbnail while video loads
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                        
+                        // Big play button
+                        Button {
+                            loadAndPlayVideo()
+                        } label: {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 80))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .shadow(color: .black.opacity(0.5), radius: 10)
+                        }
+                    } else {
+                        ProgressView("Loading…")
+                            .foregroundStyle(.white)
+                    }
+                } else {
+                    // PHOTO VIEW (existing code)
+                    if let image {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .scaleEffect(scale)
+                            .gesture(
+                                MagnifyGesture()
+                                    .onChanged { value in
+                                        // Don't allow zoom while dismissing
+                                        guard dragOffset == 0 else { return }
+                                        scale = lastScale * value.magnification
+                                    }
+                                    .onEnded { _ in
+                                        withAnimation(.spring(response: 0.3)) {
+                                            if scale < 1.0 {
+                                                scale = 1.0
+                                            } else if scale > 4.0 {
+                                                scale = 4.0
+                                            }
+                                            lastScale = scale
                                         }
-                                        lastScale = scale
+                                    }
+                            )
+                            .onTapGesture(count: 2) {
+                                guard dragOffset == 0 else { return }
+                                withAnimation(.spring(response: 0.3)) {
+                                    if scale > 1.0 {
+                                        scale = 1.0
+                                        lastScale = 1.0
+                                    } else {
+                                        scale = 2.0
+                                        lastScale = 2.0
                                     }
                                 }
-                        )
-                        .onTapGesture(count: 2) {
-                            guard dragOffset == 0 else { return }
-                            withAnimation(.spring(response: 0.3)) {
-                                if scale > 1.0 {
-                                    scale = 1.0
-                                    lastScale = 1.0
-                                } else {
-                                    scale = 2.0
-                                    lastScale = 2.0
+                            }
+                            .onChange(of: dragOffset) {
+                                // Reset zoom when starting to dismiss
+                                if dragOffset > 0 && scale != 1.0 {
+                                    withAnimation(.spring(response: 0.2)) {
+                                        scale = 1.0
+                                        lastScale = 1.0
+                                    }
                                 }
                             }
-                        }
-                        .onAppear {
-                            onImageReady(image)
-                            // Generate story image in background
-                            Task.detached(priority: .utility) {
-                                let storyImage = await createStoryImageAsync(from: image, asset: asset)
-                                await MainActor.run {
-                                    onStoryImageReady(storyImage)
-                                }
-                            }
-                        }
-                        .onChange(of: dragOffset) {
-                            // Reset zoom when starting to dismiss
-                            if dragOffset > 0 && scale != 1.0 {
-                                withAnimation(.spring(response: 0.2)) {
-                                    scale = 1.0
-                                    lastScale = 1.0
-                                }
-                            }
-                        }
-                } else {
-                    ProgressView("Loading…")
-                        .foregroundStyle(.white)
+                    } else {
+                        ProgressView("Loading…")
+                            .foregroundStyle(.white)
+                    }
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -959,6 +1006,27 @@ private struct PagedPhotoView: View {
         }
         .task {
             await loadFull()
+        }
+        .onDisappear {
+            // Stop video when leaving
+            player?.pause()
+            player = nil
+        }
+    }
+    
+    private func loadAndPlayVideo() {
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .automatic
+        
+        PHImageManager.default().requestPlayerItem(forVideo: asset, options: options) { playerItem, _ in
+            DispatchQueue.main.async {
+                if let playerItem {
+                    self.player = AVPlayer(playerItem: playerItem)
+                    self.player?.play()
+                    self.isPlaying = true
+                }
+            }
         }
     }
 
@@ -976,6 +1044,17 @@ private struct PagedPhotoView: View {
             options: opts
         ) { img, _ in
             self.image = img
+            // Notify parent immediately when image loads
+            if let img {
+                self.onImageReady(img)
+                // Generate story image in background
+                Task.detached(priority: .utility) {
+                    let storyImage = await self.createStoryImageAsync(from: img, asset: self.asset)
+                    await MainActor.run {
+                        self.onStoryImageReady(storyImage)
+                    }
+                }
+            }
         }
     }
     
@@ -1189,7 +1268,7 @@ final class MemoriesViewModel: ObservableObject {
 
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        fetchOptions.predicate = NSPredicate(format: "mediaType == %d OR mediaType == %d", PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)
 
         let results = PHAsset.fetchAssets(with: fetchOptions)
 
@@ -1479,7 +1558,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.1.7")
+                        Text("1.2.0")
                             .foregroundStyle(.secondary)
                     }
                 } header: {

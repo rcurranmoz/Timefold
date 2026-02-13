@@ -228,8 +228,6 @@ private struct MemoriesGridView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
     
     @State private var deletedAssets: Set<String> = []
-    @State private var assetToDelete: PHAsset?
-    @State private var showingDeleteAlert = false
     @State private var visibleYear: Int?
     @State private var showYear = false
     @State private var hideYearTask: DispatchWorkItem?
@@ -267,14 +265,7 @@ private struct MemoriesGridView: View {
                 .padding(.bottom, 80)
             }
         }
-        .alert("Delete Photo?", isPresented: $showingDeleteAlert, presenting: assetToDelete) { asset in
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                deletePhoto(asset: asset)
-            }
-        } message: { asset in
-            deleteMessage(for: asset)
-        }
+
     }
     
     private var gridContent: some View {
@@ -290,8 +281,7 @@ private struct MemoriesGridView: View {
                                 asset: asset,
                                 cellSize: cell,
                                 onDelete: {
-                                    assetToDelete = asset
-                                    showingDeleteAlert = true
+                                    deletePhoto(asset: asset)
                                 }
                             )
                             .background(
@@ -381,17 +371,7 @@ private struct MemoriesGridView: View {
             }
         }
     }
-    
-    private func deleteMessage(for asset: PHAsset) -> Text {
-        if let date = asset.creationDate {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            return Text("Photo from \(formatter.string(from: date)) will be permanently deleted.")
-        } else {
-            return Text("This photo will be permanently deleted.")
-        }
-    }
-    
+
     private func deletePhoto(asset: PHAsset) {
         PHPhotoLibrary.shared().performChanges({
             PHAssetChangeRequest.deleteAssets([asset] as NSArray)
@@ -745,51 +725,123 @@ private struct MemoryPagerView: View {
                 )
             }
             
-            // Draw white border around photo
-            let borderRect = photoRect.insetBy(dx: -30, dy: -30)
-            ctx.setFillColor(UIColor.white.cgColor)
-            ctx.setShadow(offset: CGSize(width: 0, height: 15), blur: 45, color: UIColor.black.withAlphaComponent(0.3).cgColor)
-            ctx.fill(borderRect)
+            // LOGO BADGE - In background above photo, bigger and subtle
+            let logoY: CGFloat = 120  // Positioned in gradient area above photo
+            let badgeCornerRadius: CGFloat = 32
+            let badgeInternalPadding: CGFloat = 32
+            
+            // Logo dimensions - BIGGER (back to full size)
+            let clockRadius: CGFloat = 42
+            let dividerSpacing: CGFloat = 32
+            let dividerWidth: CGFloat = 4
+            
+            // Calculate text size first
+            let textAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 58, weight: .black),
+                .foregroundColor: UIColor.white,
+                .kern: 10
+            ]
+            let text = "TIMEFOLD" as NSString
+            let textSize = text.size(withAttributes: textAttrs)
+            
+            // Calculate badge dimensions
+            let badgeContentWidth = clockRadius * 2 + dividerSpacing + dividerWidth + dividerSpacing + textSize.width
+            let badgeContentHeight = max(clockRadius * 2, textSize.height)
+            let badgeWidth = badgeContentWidth + (badgeInternalPadding * 2)
+            let badgeHeight = badgeContentHeight + (badgeInternalPadding * 2)
+            
+            // Position badge centered horizontally, above photo in gradient background
+            let badgeX = (storySize.width - badgeWidth) / 2
+            let badgeY = logoY
+            let badgeRect = CGRect(x: badgeX, y: badgeY, width: badgeWidth, height: badgeHeight)
+            
+            // Draw rounded rectangle background with VERY SUBTLE shadow - blend into background
+            ctx.setShadow(offset: CGSize(width: 0, height: 3), blur: 10, color: UIColor.black.withAlphaComponent(0.15).cgColor)
+            let badgePath = UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeCornerRadius)
+            UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 0.35).setFill()  // Very subtle 35% opacity
+            badgePath.fill()
             ctx.setShadow(offset: .zero, blur: 0, color: nil)
             
-            // Draw the photo
+            // Calculate positions inside badge
+            let clockCenterX = badgeX + badgeInternalPadding + clockRadius
+            let clockCenterY = badgeY + badgeHeight / 2
+            
+            // Clock circle - WHITE with reduced opacity
+            let clockPath = UIBezierPath(arcCenter: CGPoint(x: clockCenterX, y: clockCenterY),
+                                          radius: clockRadius,
+                                          startAngle: 0,
+                                          endAngle: .pi * 2,
+                                          clockwise: true)
+            UIColor.white.withAlphaComponent(0.65).setStroke()  // 65% opacity for subtlety
+            clockPath.lineWidth = 5
+            clockPath.stroke()
+            
+            // Hour hand (pointing up) - WHITE with reduced opacity
+            let hourPath = UIBezierPath()
+            hourPath.move(to: CGPoint(x: clockCenterX, y: clockCenterY))
+            hourPath.addLine(to: CGPoint(x: clockCenterX, y: clockCenterY - clockRadius * 0.6))
+            hourPath.lineWidth = 5
+            hourPath.lineCapStyle = .round
+            UIColor.white.withAlphaComponent(0.65).setStroke()
+            hourPath.stroke()
+            
+            // Minute hand (pointing right-ish) - WHITE with reduced opacity
+            let minutePath = UIBezierPath()
+            minutePath.move(to: CGPoint(x: clockCenterX, y: clockCenterY))
+            minutePath.addLine(to: CGPoint(x: clockCenterX + clockRadius * 0.5, y: clockCenterY + clockRadius * 0.2))
+            minutePath.lineWidth = 4.5
+            minutePath.lineCapStyle = .round
+            UIColor.white.withAlphaComponent(0.65).setStroke()
+            minutePath.stroke()
+            
+            // Center dot - WHITE with reduced opacity
+            let dotPath = UIBezierPath(arcCenter: CGPoint(x: clockCenterX, y: clockCenterY),
+                                        radius: 5.5,
+                                        startAngle: 0,
+                                        endAngle: .pi * 2,
+                                        clockwise: true)
+            UIColor.white.withAlphaComponent(0.65).setFill()
+            dotPath.fill()
+            
+            // Vertical divider line - WHITE with reduced opacity
+            let dividerX = clockCenterX + clockRadius + dividerSpacing
+            let dividerHeight = badgeContentHeight * 0.6
+            let dividerPath = UIBezierPath()
+            dividerPath.move(to: CGPoint(x: dividerX, y: clockCenterY - dividerHeight / 2))
+            dividerPath.addLine(to: CGPoint(x: dividerX, y: clockCenterY + dividerHeight / 2))
+            dividerPath.lineWidth = dividerWidth
+            UIColor.white.withAlphaComponent(0.65).setStroke()
+            dividerPath.stroke()
+            
+            // TIMEFOLD text - WHITE with reduced opacity
+            let textX = dividerX + dividerSpacing
+            let textY = clockCenterY - textSize.height / 2
+            let subtleTextAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 58, weight: .black),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.65),  // 65% opacity
+                .kern: 10
+            ]
+            (text as NSString).draw(at: CGPoint(x: textX, y: textY), withAttributes: subtleTextAttrs)
+            
+            // Draw white rounded border around photo
+            let borderRect = photoRect.insetBy(dx: -30, dy: -30)
+            let borderPath = UIBezierPath(roundedRect: borderRect, cornerRadius: 24)
+            ctx.setFillColor(UIColor.white.cgColor)
+            ctx.setShadow(offset: CGSize(width: 0, height: 15), blur: 45, color: UIColor.black.withAlphaComponent(0.3).cgColor)
+            borderPath.fill()
+            ctx.setShadow(offset: .zero, blur: 0, color: nil)
+            
+            // Draw the photo with rounded corners
+            ctx.saveGState()
+            let photoPath = UIBezierPath(roundedRect: photoRect, cornerRadius: 18)
+            photoPath.addClip()
             image.draw(in: photoRect)
+            ctx.restoreGState()
             
             // Text overlay at bottom
             let dateText = formattedDateForStory(asset.creationDate)
             let yearsText = yearsAgoForStory(asset.creationDate)
-            
-            // SIMPLE BOLD LOGO - no glitch, just works
-            let logoY: CGFloat = 100
-            
-            // Big bold "TIMEFOLD"
-            let textAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 72, weight: .black),
-                .foregroundColor: UIColor.white,
-                .strokeColor: UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 1.0),
-                .strokeWidth: -3.0
-            ]
-            let text = "TIMEFOLD" as NSString
-            let textSize = text.size(withAttributes: textAttrs)
-            let textX = (storySize.width - textSize.width) / 2
-            
-            // Draw with big shadow
-            ctx.setShadow(offset: CGSize(width: 0, height: 6), blur: 20, color: UIColor.black.withAlphaComponent(0.7).cgColor)
-            text.draw(at: CGPoint(x: textX, y: logoY), withAttributes: textAttrs)
             ctx.setShadow(offset: .zero, blur: 0, color: nil)
-            
-            // Clock icon below
-            let iconSize: CGFloat = 55
-            let iconY = logoY + textSize.height + 20
-            let iconX = (storySize.width - iconSize) / 2
-            
-            let iconConfig = UIImage.SymbolConfiguration(pointSize: iconSize * 0.7, weight: .bold)
-            if let clockIcon = UIImage(systemName: "clock.arrow.circlepath", withConfiguration: iconConfig) {
-                let whiteIcon = clockIcon.withTintColor(.white, renderingMode: .alwaysOriginal)
-                ctx.setShadow(offset: CGSize(width: 0, height: 4), blur: 15, color: UIColor.black.withAlphaComponent(0.6).cgColor)
-                whiteIcon.draw(in: CGRect(x: iconX, y: iconY, width: iconSize, height: iconSize))
-                ctx.setShadow(offset: .zero, blur: 0, color: nil)
-            }
             
             // Date text
             let dateAttrs: [NSAttributedString.Key: Any] = [
@@ -798,6 +850,7 @@ private struct MemoryPagerView: View {
             ]
             let dateString = dateText as NSString
             let dateSize = dateString.size(withAttributes: dateAttrs)
+            ctx.setShadow(offset: CGSize(width: 0, height: 4), blur: 12, color: UIColor.black.withAlphaComponent(0.3).cgColor)
             dateString.draw(
                 at: CGPoint(x: (storySize.width - dateSize.width) / 2, y: photoRect.maxY + 75),
                 withAttributes: dateAttrs
@@ -814,6 +867,7 @@ private struct MemoryPagerView: View {
                 at: CGPoint(x: (storySize.width - yearsSize.width) / 2, y: photoRect.maxY + 165),
                 withAttributes: yearsAttrs
             )
+            ctx.setShadow(offset: .zero, blur: 0, color: nil)
         }
         
         return storyImage
@@ -1113,38 +1167,134 @@ private struct PagedPhotoView: View {
                 }
                 
                 let borderRect = photoRect.insetBy(dx: -20, dy: -20)
+                let borderPath = UIBezierPath(roundedRect: borderRect, cornerRadius: 16)
                 ctx.setFillColor(UIColor.white.cgColor)
                 ctx.setShadow(offset: CGSize(width: 0, height: 10), blur: 30, color: UIColor.black.withAlphaComponent(0.3).cgColor)
-                ctx.fill(borderRect)
+                borderPath.fill()
                 ctx.setShadow(offset: .zero, blur: 0, color: nil)
                 
+                // Draw the photo with rounded corners
+                ctx.saveGState()
+                let photoPath = UIBezierPath(roundedRect: photoRect, cornerRadius: 12)
+                photoPath.addClip()
                 image.draw(in: photoRect)
+                ctx.restoreGState()
+                
+                // LOGO BADGE - In background above photo, bigger and subtle (scaled for 720px)
+                let logoY: CGFloat = 80  // Positioned in gradient area above photo
+                let badgeCornerRadius: CGFloat = 21
+                let badgeInternalPadding: CGFloat = 21
+                
+                // Logo dimensions - BIGGER for 720px canvas
+                let clockRadius: CGFloat = 28
+                let dividerSpacing: CGFloat = 21
+                let dividerWidth: CGFloat = 2.7
+                
+                // Calculate text size first
+                let textAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 39, weight: .black),  // Scaled proportionally
+                    .foregroundColor: UIColor.white,
+                    .kern: 6.7
+                ]
+                let text = "TIMEFOLD" as NSString
+                let textSize = text.size(withAttributes: textAttrs)
+                
+                // Calculate badge dimensions
+                let badgeContentWidth = clockRadius * 2 + dividerSpacing + dividerWidth + dividerSpacing + textSize.width
+                let badgeContentHeight = max(clockRadius * 2, textSize.height)
+                let badgeWidth = badgeContentWidth + (badgeInternalPadding * 2)
+                let badgeHeight = badgeContentHeight + (badgeInternalPadding * 2)
+                
+                // Position badge centered horizontally, above photo in gradient background
+                let badgeX = (storySize.width - badgeWidth) / 2
+                let badgeY = logoY
+                let badgeRect = CGRect(x: badgeX, y: badgeY, width: badgeWidth, height: badgeHeight)
+                
+                // Draw rounded rectangle background with VERY SUBTLE shadow - blend into background
+                ctx.setShadow(offset: CGSize(width: 0, height: 2), blur: 7, color: UIColor.black.withAlphaComponent(0.15).cgColor)
+                let badgePath = UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeCornerRadius)
+                UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 0.35).setFill()  // Very subtle 35% opacity
+                badgePath.fill()
+                ctx.setShadow(offset: .zero, blur: 0, color: nil)
+                
+                // Calculate positions inside badge
+                let clockCenterX = badgeX + badgeInternalPadding + clockRadius
+                let clockCenterY = badgeY + badgeHeight / 2
+                
+                // Clock circle - WHITE with reduced opacity
+                let clockPath = UIBezierPath(arcCenter: CGPoint(x: clockCenterX, y: clockCenterY),
+                                              radius: clockRadius,
+                                              startAngle: 0,
+                                              endAngle: .pi * 2,
+                                              clockwise: true)
+                UIColor.white.withAlphaComponent(0.65).setStroke()  // 65% opacity for subtlety
+                clockPath.lineWidth = 3.3
+                clockPath.stroke()
+                
+                // Hour hand (pointing up) - WHITE with reduced opacity
+                let hourPath = UIBezierPath()
+                hourPath.move(to: CGPoint(x: clockCenterX, y: clockCenterY))
+                hourPath.addLine(to: CGPoint(x: clockCenterX, y: clockCenterY - clockRadius * 0.6))
+                hourPath.lineWidth = 3.3
+                hourPath.lineCapStyle = .round
+                UIColor.white.withAlphaComponent(0.65).setStroke()
+                hourPath.stroke()
+                
+                // Minute hand (pointing right-ish) - WHITE with reduced opacity
+                let minutePath = UIBezierPath()
+                minutePath.move(to: CGPoint(x: clockCenterX, y: clockCenterY))
+                minutePath.addLine(to: CGPoint(x: clockCenterX + clockRadius * 0.5, y: clockCenterY + clockRadius * 0.2))
+                minutePath.lineWidth = 3
+                minutePath.lineCapStyle = .round
+                UIColor.white.withAlphaComponent(0.65).setStroke()
+                minutePath.stroke()
+                
+                // Center dot - WHITE with reduced opacity
+                let dotPath = UIBezierPath(arcCenter: CGPoint(x: clockCenterX, y: clockCenterY),
+                                            radius: 3.7,
+                                            startAngle: 0,
+                                            endAngle: .pi * 2,
+                                            clockwise: true)
+                UIColor.white.withAlphaComponent(0.65).setFill()
+                dotPath.fill()
+                
+                // Vertical divider line - WHITE with reduced opacity
+                let dividerX = clockCenterX + clockRadius + dividerSpacing
+                let dividerHeight = badgeContentHeight * 0.6
+                let dividerPath = UIBezierPath()
+                dividerPath.move(to: CGPoint(x: dividerX, y: clockCenterY - dividerHeight / 2))
+                dividerPath.addLine(to: CGPoint(x: dividerX, y: clockCenterY + dividerHeight / 2))
+                dividerPath.lineWidth = dividerWidth
+                UIColor.white.withAlphaComponent(0.65).setStroke()
+                dividerPath.stroke()
+                
+                // TIMEFOLD text - WHITE with reduced opacity
+                let textX = dividerX + dividerSpacing
+                let textY = clockCenterY - textSize.height / 2
+                let subtleTextAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 39, weight: .black),
+                    .foregroundColor: UIColor.white.withAlphaComponent(0.65),  // 65% opacity
+                    .kern: 6.7
+                ]
+                (text as NSString).draw(at: CGPoint(x: textX, y: textY), withAttributes: subtleTextAttrs)
                 
                 let dateText = self.formattedDateForStory(asset.creationDate)
                 let yearsText = self.yearsAgoForStory(asset.creationDate)
                 
-                let appNameAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 32, weight: .bold),
-                    .foregroundColor: UIColor.white
-                ]
-                let appName = "Timefold" as NSString
-                let appNameSize = appName.size(withAttributes: appNameAttrs)
-                appName.draw(
-                    at: CGPoint(x: (storySize.width - appNameSize.width) / 2, y: 80),
-                    withAttributes: appNameAttrs
-                )
-                
+                // Date text - centered and clean
                 let dateAttrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.systemFont(ofSize: 48, weight: .bold),
                     .foregroundColor: UIColor.white
                 ]
                 let dateString = dateText as NSString
                 let dateSize = dateString.size(withAttributes: dateAttrs)
+                ctx.setShadow(offset: CGSize(width: 0, height: 3), blur: 8, color: UIColor.black.withAlphaComponent(0.3).cgColor)
                 dateString.draw(
                     at: CGPoint(x: (storySize.width - dateSize.width) / 2, y: photoRect.maxY + 50),
                     withAttributes: dateAttrs
                 )
                 
+                // Years ago text
                 let yearsAttrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.systemFont(ofSize: 36, weight: .medium),
                     .foregroundColor: UIColor.white.withAlphaComponent(0.9)
@@ -1155,6 +1305,7 @@ private struct PagedPhotoView: View {
                     at: CGPoint(x: (storySize.width - yearsSize.width) / 2, y: photoRect.maxY + 110),
                     withAttributes: yearsAttrs
                 )
+                ctx.setShadow(offset: .zero, blur: 0, color: nil)
             }
         }.value
     }
@@ -1559,7 +1710,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.2.0")
+                        Text("1.3.1")
                             .foregroundStyle(.secondary)
                     }
                 } header: {

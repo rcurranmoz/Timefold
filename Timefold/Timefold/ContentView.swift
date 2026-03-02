@@ -41,7 +41,7 @@ struct ContentView: View {
 
                 case .loaded(let assets):
                     if viewMode == .grid {
-                        MemoriesGridView(assets: assets)
+                        MemoriesGridView(assets: assets, isGridViewMode: $viewMode)
                     } else {
                         MemoryPagerView(
                             assets: assets,
@@ -65,10 +65,10 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 2) {
-                        HStack(spacing: 4) {
+                    VStack(spacing: 1) {
+                        HStack(spacing: 3) {
                             Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 16, weight: .semibold))
+                                .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(
                                     LinearGradient(
                                         colors: [.orange, .pink],
@@ -77,7 +77,7 @@ struct ContentView: View {
                                     )
                                 )
                             Text("Timefold")
-                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
                                 .foregroundStyle(
                                     LinearGradient(
                                         colors: [.orange, .pink],
@@ -86,9 +86,9 @@ struct ContentView: View {
                                     )
                                 )
                         }
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             Text(formatDateString(selectedDate))
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(.secondary)
                             
                             if !Calendar.current.isDateInToday(selectedDate) {
@@ -97,34 +97,40 @@ struct ContentView: View {
                                     model.loadMemoriesFor(date: Date())
                                 } label: {
                                     Text("• Today")
-                                        .font(.system(size: 11, weight: .medium))
+                                        .font(.system(size: 10, weight: .medium))
                                         .foregroundStyle(.blue)
                                 }
                             }
                         }
                     }
+                    .fixedSize()
+                    .transition(.scale.combined(with: .opacity))
+                    .animation(.spring(response: 0.4, dampingFraction: 0.7), value: model.state)
                 }
                 
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
+                    // Fixed frame container
+                    HStack {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
                     }
+                    .frame(width: 44, height: 44)
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        // Calendar picker - only in grid view
-                        if viewMode == .grid {
-                            Button {
-                                showingDatePicker = true
-                            } label: {
-                                Image(systemName: "calendar")
-                            }
+                    // Fixed frame container with exact width
+                    HStack(spacing: 12) {
+                        Button {
+                            showingDatePicker = true
+                        } label: {
+                            Image(systemName: "calendar")
+                                .opacity(viewMode == .grid ? 1 : 0)
                         }
+                        .disabled(viewMode != .grid)
                         
-                        // View mode toggle
                         Button {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 viewMode = viewMode == .grid ? .fullscreen : .grid
@@ -133,8 +139,10 @@ struct ContentView: View {
                             Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
                         }
                     }
+                    .frame(width: 100, height: 44)
                 }
             }
+            .toolbarBackground(.visible, for: .navigationBar)
         }
         .task {
             model.start()
@@ -224,48 +232,87 @@ private struct PermissionView: View {
 
 private struct MemoriesGridView: View {
     let assets: [PHAsset]
+    @Binding var isGridViewMode: ContentView.ViewMode
+    
     private let spacing: CGFloat = 2
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
     
     @State private var deletedAssets: Set<String> = []
-    @State private var visibleYear: Int?
-    @State private var showYear = false
-    @State private var hideYearTask: DispatchWorkItem?
-    @State private var lastYearUpdate: Date = .distantPast
     
-    init(assets: [PHAsset]) {
-        self.assets = assets
-        // Initialize to first year
-        if let firstAsset = assets.first,
-           let date = firstAsset.creationDate {
-            let year = Calendar.current.component(.year, from: date)
-            _visibleYear = State(initialValue: year)
-        }
-    }
+    // Multi-select mode
+    @State private var isSelecting = false
+    @State private var selectedAssets: Set<String> = []
+    @State private var showingDeleteConfirmation = false
 
     var body: some View {
         ZStack {
             gridContent
             
-            // Floating year indicator
-            if showYear, let year = visibleYear {
+            // Selection mode toolbar at bottom
+            if isSelecting {
                 VStack {
                     Spacer()
-                    Text(String(year))
-                        .font(.system(size: 28, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                        .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
-                        .transition(.opacity)
-                        .animation(.easeInOut(duration: 0.5), value: showYear)
+                    
+                    HStack {
+                        Spacer()
+                        
+                        Text("\(selectedAssets.count) Selected")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 12)
+                    .background(.regularMaterial)
                 }
-                .padding(.bottom, 80)
+                .ignoresSafeArea(edges: .bottom)
             }
         }
-
+        .toolbar {
+            // Only show these toolbar items when in grid mode
+            if isGridViewMode == .grid {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if isSelecting {
+                        HStack(spacing: 12) {
+                            Button("Cancel") {
+                                withAnimation {
+                                    isSelecting = false
+                                    selectedAssets.removeAll()
+                                }
+                            }
+                            
+                            Button(role: .destructive) {
+                                showingDeleteConfirmation = true
+                            } label: {
+                                Text("Delete")
+                            }
+                            .disabled(selectedAssets.isEmpty)
+                        }
+                    } else {
+                        Button {
+                            withAnimation {
+                                isSelecting = true
+                            }
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                        }
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete \(selectedAssets.count) \(selectedAssets.count == 1 ? "item" : "items")?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                deleteSelectedPhotos()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
+        }
     }
     
     private var gridContent: some View {
@@ -280,21 +327,13 @@ private struct MemoriesGridView: View {
                                 assets: assets,
                                 asset: asset,
                                 cellSize: cell,
+                                isSelecting: isSelecting,
+                                isSelected: selectedAssets.contains(asset.localIdentifier),
+                                onToggleSelection: {
+                                    toggleSelection(for: asset)
+                                },
                                 onDelete: {
                                     deletePhoto(asset: asset)
-                                }
-                            )
-                            .background(
-                                GeometryReader { itemGeo in
-                                    Color.clear
-                                        .onChange(of: itemGeo.frame(in: .named("scroll")).minY) { _ in
-                                            let frame = itemGeo.frame(in: .named("scroll"))
-                                            updateVisibleYear(for: asset, frame: frame, in: geo.size.height)
-                                        }
-                                        .onAppear {
-                                            let frame = itemGeo.frame(in: .named("scroll"))
-                                            updateVisibleYear(for: asset, frame: frame, in: geo.size.height)
-                                        }
                                 }
                             )
                         }
@@ -302,71 +341,38 @@ private struct MemoriesGridView: View {
                 }
                 .padding(.horizontal, 0)
             }
-            .coordinateSpace(name: "scroll")
             .scrollIndicators(.hidden)
             .ignoresSafeArea(edges: .bottom)
         }
     }
     
-    private func updateVisibleYear(for asset: PHAsset, frame: CGRect, in viewHeight: CGFloat) {
-        // Check if item is near the TOP of the screen (first 20% of viewport)
-        let topZone = viewHeight * 0.2
+    private func toggleSelection(for asset: PHAsset) {
+        if selectedAssets.contains(asset.localIdentifier) {
+            selectedAssets.remove(asset.localIdentifier)
+        } else {
+            selectedAssets.insert(asset.localIdentifier)
+        }
+    }
+    
+    private func deleteSelectedPhotos() {
+        let assetsToDelete = assets.filter { selectedAssets.contains($0.localIdentifier) }
         
-        if frame.minY >= 0 && frame.minY <= topZone {
-            if let date = asset.creationDate {
-                let year = Calendar.current.component(.year, from: date)
-                
-                // If year changed, throttle updates to prevent glitchiness
-                if visibleYear != year {
-                    let now = Date()
-                    let timeSinceLastUpdate = now.timeIntervalSince(lastYearUpdate)
-                    
-                    // Only update if enough time has passed (0.5 seconds)
-                    guard timeSinceLastUpdate > 0.5 else { return }
-                    
-                    lastYearUpdate = now
-                    
-                    // Gentle fade out
-                    withAnimation(.easeInOut(duration: 0.4)) {
-                        showYear = false
-                    }
-                    
-                    // Update year and fade in
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        visibleYear = year
-                        withAnimation(.easeInOut(duration: 0.4)) {
-                            showYear = true
+        PHPhotoLibrary.shared().performChanges({
+            PHAssetChangeRequest.deleteAssets(assetsToDelete as NSArray)
+        }) { success, error in
+            DispatchQueue.main.async {
+                if success {
+                    withAnimation {
+                        // Mark as deleted
+                        for asset in assetsToDelete {
+                            deletedAssets.insert(asset.localIdentifier)
                         }
-                        
-                        // Cancel existing hide task
-                        hideYearTask?.cancel()
-                        
-                        // Schedule new hide task
-                        let task = DispatchWorkItem {
-                            withAnimation(.easeInOut(duration: 0.5)) {
-                                showYear = false
-                            }
-                        }
-                        hideYearTask = task
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: task)
+                        // Clear selection and exit selection mode
+                        selectedAssets.removeAll()
+                        isSelecting = false
                     }
-                } else if !showYear {
-                    // Just show the year if it's not currently visible
-                    withAnimation(.easeInOut(duration: 0.4)) {
-                        showYear = true
-                    }
-                    
-                    // Cancel existing hide task
-                    hideYearTask?.cancel()
-                    
-                    // Schedule new hide task
-                    let task = DispatchWorkItem {
-                        withAnimation(.easeInOut(duration: 0.5)) {
-                            showYear = false
-                        }
-                    }
-                    hideYearTask = task
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: task)
+                } else if let error = error {
+                    print("Error deleting photos: \(error.localizedDescription)")
                 }
             }
         }
@@ -391,44 +397,92 @@ private struct GridCellView: View {
     let assets: [PHAsset]
     let asset: PHAsset
     let cellSize: CGFloat
+    let isSelecting: Bool
+    let isSelected: Bool
+    let onToggleSelection: () -> Void
     let onDelete: () -> Void
     
     var body: some View {
-        NavigationLink {
-            MemoryPagerView(assets: assets, startAsset: asset)
-        } label: {
-            ZStack {
-                AssetThumbnailView(asset: asset)
-                    .frame(width: cellSize, height: cellSize)
-                    .clipped()
-                
-                // Video play icon overlay
-                if asset.mediaType == .video {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.5), radius: 2)
-                            
-                            // Video duration
-                            Text(formatDuration(asset.duration))
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.5), radius: 2)
-                            
-                            Spacer()
-                        }
-                        .padding(6)
+        ZStack {
+            if isSelecting {
+                // In selection mode, use a button for selection
+                Button {
+                    onToggleSelection()
+                } label: {
+                    cellContent
+                }
+                .buttonStyle(.plain)
+            } else {
+                // In normal mode, use NavigationLink
+                NavigationLink {
+                    MemoryPagerView(assets: assets, startAsset: asset)
+                } label: {
+                    cellContent
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button(role: .destructive, action: onDelete) {
+                        Label(asset.mediaType == .video ? "Delete Video" : "Delete Photo", systemImage: "trash")
                     }
                 }
             }
+            
+            // Selection overlay
+            if isSelecting {
+                VStack {
+                    HStack {
+                        Spacer()
+                        ZStack {
+                            Circle()
+                                .fill(isSelected ? Color.blue : Color.white.opacity(0.3))
+                                .frame(width: 28, height: 28)
+                            
+                            if isSelected {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundStyle(.white)
+                            } else {
+                                Circle()
+                                    .strokeBorder(Color.white, lineWidth: 2)
+                                    .frame(width: 24, height: 24)
+                            }
+                        }
+                        .shadow(color: .black.opacity(0.2), radius: 2)
+                        .padding(8)
+                    }
+                    Spacer()
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button(role: .destructive, action: onDelete) {
-                Label(asset.mediaType == .video ? "Delete Video" : "Delete Photo", systemImage: "trash")
+    }
+    
+    private var cellContent: some View {
+        ZStack {
+            AssetThumbnailView(asset: asset)
+                .frame(width: cellSize, height: cellSize)
+                .clipped()
+                .opacity(isSelecting && !isSelected ? 0.6 : 1.0)
+            
+            // Video play icon overlay
+            if asset.mediaType == .video {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 2)
+                        
+                        // Video duration
+                        Text(formatDuration(asset.duration))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 2)
+                        
+                        Spacer()
+                    }
+                    .padding(6)
+                }
             }
         }
     }
@@ -491,11 +545,18 @@ private struct MemoryPagerView: View {
 
     @State private var selection: Int = 0
     @State private var showingShare = false
+    @State private var isPreparingShare = false
+    @State private var shareItem: ShareItem?
     @State private var loadedImages: [String: UIImage] = [:]
     @State private var storyImages: [String: UIImage] = [:]
     @State private var dragOffset: CGFloat = 0
     @State private var opacity: Double = 1.0
     @GestureState private var dragState: CGFloat = 0
+    
+    enum ShareItem {
+        case image(UIImage)
+        case video(PHAsset)
+    }
     
     private var currentImage: UIImage? {
         guard let asset = assets[safe: selection] else { return nil }
@@ -635,8 +696,14 @@ private struct MemoryPagerView: View {
                         .fontWeight(.semibold)
                         .foregroundStyle(.primary)
                 }
-                .disabled(currentImage == nil)
+                .disabled(currentImage == nil || isPreparingShare)
                 .opacity(dragOffset > 20 ? 0 : 1)
+                .overlay {
+                    if isPreparingShare {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
             }
         }
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
@@ -646,14 +713,55 @@ private struct MemoryPagerView: View {
             }
         }
         .sheet(isPresented: $showingShare) {
-            if let storyImage = currentStoryImage {
-                ActivityView(activityItems: [storyImage])
-            } else if let currentImage, let asset = currentAsset {
-                // Fallback if story image not ready yet
-                let storyImage = createStoryImage(from: currentImage, asset: asset) ?? currentImage
-                ActivityView(activityItems: [storyImage])
+            if let shareItem {
+                switch shareItem {
+                case .image(let image):
+                    ActivityView(activityItems: [image])
+                case .video(let asset):
+                    VideoActivityView(asset: asset)
+                }
+            }
+        }
+        .onChange(of: showingShare) { newValue in
+            if newValue {
+                // Prepare share content
+                isPreparingShare = true
+                
+                Task {
+                    if currentAssetIsVideo, let asset = currentAsset {
+                        // For videos, just pass the asset
+                        await MainActor.run {
+                            shareItem = .video(asset)
+                            isPreparingShare = false
+                        }
+                    } else {
+                        // For photos, prepare the story image
+                        if let storyImage = currentStoryImage {
+                            await MainActor.run {
+                                shareItem = .image(storyImage)
+                                isPreparingShare = false
+                            }
+                        } else if let currentImage, let asset = currentAsset {
+                            // Generate story image if not ready
+                            let storyImage = await Task.detached(priority: .userInitiated) {
+                                return createStoryImage(from: currentImage, asset: asset) ?? currentImage
+                            }.value
+                            
+                            await MainActor.run {
+                                shareItem = .image(storyImage)
+                                isPreparingShare = false
+                            }
+                        } else {
+                            await MainActor.run {
+                                isPreparingShare = false
+                                showingShare = false
+                            }
+                        }
+                    }
+                }
             } else {
-                ActivityView(activityItems: ["Memory"])
+                // Clean up when sheet is dismissed
+                shareItem = nil
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -1483,6 +1591,45 @@ private struct ActivityView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
+private struct VideoActivityView: UIViewControllerRepresentable {
+    let asset: PHAsset
+    @Environment(\.presentationMode) private var presentationMode
+    @State private var videoURL: URL?
+    
+    func makeUIViewController(context: Context) -> UIViewController {
+        let container = UIViewController()
+        
+        // Request the video file
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        
+        PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, audioMix, info in
+            guard let urlAsset = avAsset as? AVURLAsset else { return }
+            
+            DispatchQueue.main.async {
+                // Create activity view controller with the video URL
+                let activityVC = UIActivityViewController(
+                    activityItems: [urlAsset.url],
+                    applicationActivities: nil
+                )
+                
+                activityVC.completionWithItemsHandler = { activityType, completed, returnedItems, error in
+                    DispatchQueue.main.async {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+                
+                container.present(activityVC, animated: true)
+            }
+        }
+        
+        return container
+    }
+    
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+}
+
 // MARK: - Scroll Tracking
 private struct ScrollOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
@@ -1710,7 +1857,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.3.1")
+                        Text("1.4")
                             .foregroundStyle(.secondary)
                     }
                 } header: {

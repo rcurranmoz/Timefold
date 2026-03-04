@@ -13,6 +13,9 @@ struct ContentView: View {
     @State private var showingSettings = false
     @State private var showingDatePicker = false
     @State private var selectedDate = Date()
+    @State private var isSelecting = false
+    @State private var selectedAssets: Set<String> = []
+    @State private var showingDeleteConfirmation = false
     
     enum ViewMode {
         case grid
@@ -41,7 +44,13 @@ struct ContentView: View {
 
                 case .loaded(let assets):
                     if viewMode == .grid {
-                        MemoriesGridView(assets: assets, isGridViewMode: $viewMode)
+                        MemoriesGridView(
+                            assets: assets,
+                            isGridViewMode: $viewMode,
+                            isSelecting: $isSelecting,
+                            selectedAssets: $selectedAssets,
+                            showingDeleteConfirmation: $showingDeleteConfirmation
+                        )
                     } else {
                         MemoryPagerView(
                             assets: assets,
@@ -121,25 +130,57 @@ struct ContentView: View {
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {
-                    // Fixed frame container with exact width
                     HStack(spacing: 12) {
-                        Button {
-                            showingDatePicker = true
-                        } label: {
-                            Image(systemName: "calendar")
-                                .opacity(viewMode == .grid ? 1 : 0)
+                        // Calendar button (only in grid mode)
+                        if viewMode == .grid {
+                            Button {
+                                showingDatePicker = true
+                            } label: {
+                                Image(systemName: "calendar")
+                            }
                         }
-                        .disabled(viewMode != .grid)
                         
+                        // View mode toggle button
                         Button {
                             withAnimation(.easeInOut(duration: 0.2)) {
+                                // Clear selection when switching to fullscreen
+                                if viewMode == .grid {
+                                    isSelecting = false
+                                    selectedAssets.removeAll()
+                                }
                                 viewMode = viewMode == .grid ? .fullscreen : .grid
                             }
                         } label: {
                             Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
                         }
+                        
+                        // Select/Delete buttons (only when in grid mode with loaded assets)
+                        if case .loaded = model.state, viewMode == .grid {
+                            if isSelecting {
+                                Button("Cancel") {
+                                    withAnimation {
+                                        isSelecting = false
+                                        selectedAssets.removeAll()
+                                    }
+                                }
+                                
+                                Button(role: .destructive) {
+                                    showingDeleteConfirmation = true
+                                } label: {
+                                    Text("Delete")
+                                }
+                                .disabled(selectedAssets.isEmpty)
+                            } else {
+                                Button {
+                                    withAnimation {
+                                        isSelecting = true
+                                    }
+                                } label: {
+                                    Image(systemName: "checkmark.circle")
+                                }
+                            }
+                        }
                     }
-                    .frame(width: 100, height: 44)
                 }
             }
             .toolbarBackground(.visible, for: .navigationBar)
@@ -165,12 +206,48 @@ struct ContentView: View {
                 showingDatePicker = false
             })
         }
+        .confirmationDialog(
+            "Delete \(selectedAssets.count) \(selectedAssets.count == 1 ? "item" : "items")?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if case .loaded(let assets) = model.state {
+                    deleteSelectedPhotos(from: assets)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action cannot be undone.")
+        }
     }
     
     private func formatDateString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM d"
         return formatter.string(from: date)
+    }
+    
+    private func deleteSelectedPhotos(from assets: [PHAsset]) {
+        let assetsToDelete = assets.filter { selectedAssets.contains($0.localIdentifier) }
+        
+        PHPhotoLibrary.shared().performChanges({
+            PHAssetChangeRequest.deleteAssets(assetsToDelete as NSArray)
+        }) { success, error in
+            DispatchQueue.main.async {
+                if success {
+                    withAnimation {
+                        // Clear selection and exit selection mode
+                        selectedAssets.removeAll()
+                        isSelecting = false
+                        // Reload to update the view
+                        model.loadMemoriesFor(date: selectedDate)
+                    }
+                } else if let error = error {
+                    print("Error deleting photos: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 }
 
@@ -233,16 +310,14 @@ private struct PermissionView: View {
 private struct MemoriesGridView: View {
     let assets: [PHAsset]
     @Binding var isGridViewMode: ContentView.ViewMode
+    @Binding var isSelecting: Bool
+    @Binding var selectedAssets: Set<String>
+    @Binding var showingDeleteConfirmation: Bool
     
     private let spacing: CGFloat = 2
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
     
     @State private var deletedAssets: Set<String> = []
-    
-    // Multi-select mode
-    @State private var isSelecting = false
-    @State private var selectedAssets: Set<String> = []
-    @State private var showingDeleteConfirmation = false
 
     var body: some View {
         ZStack {
@@ -268,50 +343,6 @@ private struct MemoriesGridView: View {
                 }
                 .ignoresSafeArea(edges: .bottom)
             }
-        }
-        .toolbar {
-            // Only show these toolbar items when in grid mode
-            if isGridViewMode == .grid {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if isSelecting {
-                        HStack(spacing: 12) {
-                            Button("Cancel") {
-                                withAnimation {
-                                    isSelecting = false
-                                    selectedAssets.removeAll()
-                                }
-                            }
-                            
-                            Button(role: .destructive) {
-                                showingDeleteConfirmation = true
-                            } label: {
-                                Text("Delete")
-                            }
-                            .disabled(selectedAssets.isEmpty)
-                        }
-                    } else {
-                        Button {
-                            withAnimation {
-                                isSelecting = true
-                            }
-                        } label: {
-                            Image(systemName: "checkmark.circle")
-                        }
-                    }
-                }
-            }
-        }
-        .confirmationDialog(
-            "Delete \(selectedAssets.count) \(selectedAssets.count == 1 ? "item" : "items")?",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                deleteSelectedPhotos()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This action cannot be undone.")
         }
     }
     
@@ -351,30 +382,6 @@ private struct MemoriesGridView: View {
             selectedAssets.remove(asset.localIdentifier)
         } else {
             selectedAssets.insert(asset.localIdentifier)
-        }
-    }
-    
-    private func deleteSelectedPhotos() {
-        let assetsToDelete = assets.filter { selectedAssets.contains($0.localIdentifier) }
-        
-        PHPhotoLibrary.shared().performChanges({
-            PHAssetChangeRequest.deleteAssets(assetsToDelete as NSArray)
-        }) { success, error in
-            DispatchQueue.main.async {
-                if success {
-                    withAnimation {
-                        // Mark as deleted
-                        for asset in assetsToDelete {
-                            deletedAssets.insert(asset.localIdentifier)
-                        }
-                        // Clear selection and exit selection mode
-                        selectedAssets.removeAll()
-                        isSelecting = false
-                    }
-                } else if let error = error {
-                    print("Error deleting photos: \(error.localizedDescription)")
-                }
-            }
         }
     }
 
@@ -677,18 +684,7 @@ private struct MemoryPagerView: View {
             }
             
             ToolbarItemGroup(placement: .topBarTrailing) {
-                // Only show grid button when navigated (not when toggled from main view)
-                if onDismiss == nil {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "square.grid.3x3.fill")
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.primary)
-                    }
-                    .opacity(dragOffset > 20 ? 0 : 1)
-                }
-                
+                // Share button
                 Button {
                     showingShare = true
                 } label: {
@@ -703,6 +699,20 @@ private struct MemoryPagerView: View {
                         ProgressView()
                             .controlSize(.small)
                     }
+                }
+            }
+            
+            // Only show grid button when navigated (not when toggled from main view)
+            if onDismiss == nil {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "square.grid.3x3.fill")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+                    }
+                    .opacity(dragOffset > 20 ? 0 : 1)
                 }
             }
         }

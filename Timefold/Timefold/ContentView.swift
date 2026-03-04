@@ -74,10 +74,12 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 1) {
-                        HStack(spacing: 3) {
+                    let isCompact = UIScreen.main.bounds.width < 375
+                    
+                    VStack(spacing: isCompact ? 0.5 : 1) {
+                        HStack(spacing: isCompact ? 2 : 3) {
                             Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: isCompact ? 13 : 15, weight: .semibold))
                                 .foregroundStyle(
                                     LinearGradient(
                                         colors: [.orange, .pink],
@@ -86,7 +88,7 @@ struct ContentView: View {
                                     )
                                 )
                             Text("Timefold")
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .font(.system(size: isCompact ? 16 : 18, weight: .bold, design: .rounded))
                                 .foregroundStyle(
                                     LinearGradient(
                                         colors: [.orange, .pink],
@@ -95,9 +97,9 @@ struct ContentView: View {
                                     )
                                 )
                         }
-                        HStack(spacing: 3) {
+                        HStack(spacing: isCompact ? 2 : 3) {
                             Text(formatDateString(selectedDate))
-                                .font(.system(size: 10, weight: .medium))
+                                .font(.system(size: isCompact ? 9 : 10, weight: .medium))
                                 .foregroundStyle(.secondary)
                             
                             if !Calendar.current.isDateInToday(selectedDate) {
@@ -106,7 +108,7 @@ struct ContentView: View {
                                     model.loadMemoriesFor(date: Date())
                                 } label: {
                                     Text("• Today")
-                                        .font(.system(size: 10, weight: .medium))
+                                        .font(.system(size: isCompact ? 9 : 10, weight: .medium))
                                         .foregroundStyle(.blue)
                                 }
                             }
@@ -699,20 +701,6 @@ private struct MemoryPagerView: View {
                         ProgressView()
                             .controlSize(.small)
                     }
-                }
-            }
-            
-            // Only show grid button when navigated (not when toggled from main view)
-            if onDismiss == nil {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "square.grid.3x3.fill")
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.primary)
-                    }
-                    .opacity(dragOffset > 20 ? 0 : 1)
                 }
             }
         }

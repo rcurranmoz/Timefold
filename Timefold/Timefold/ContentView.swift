@@ -320,10 +320,28 @@ private struct MemoriesGridView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
     
     @State private var deletedAssets: Set<String> = []
+    @State private var isScrolling = false
+    @State private var currentYear: Int?
+    @State private var hideYearTask: Task<Void, Never>?
+    @State private var lastYearChangeTime: Date = .distantPast
 
     var body: some View {
         ZStack {
             gridContent
+            
+            // Year badge overlay (only when scrolling)
+            if let year = currentYear {
+                VStack {
+                    Spacer()
+                    Text(String(year))
+                        .font(.system(size: 80, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary.opacity(0.35))
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+                .opacity(isScrolling ? 1.0 : 0.0)
+                .animation(.easeIn(duration: 0.6), value: isScrolling)
+            }
             
             // Selection mode toolbar at bottom
             if isSelecting {
@@ -354,7 +372,7 @@ private struct MemoriesGridView: View {
             
             ScrollView {
                 LazyVGrid(columns: columns, spacing: spacing) {
-                    ForEach(assets, id: \.localIdentifier) { asset in
+                    ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
                         if !deletedAssets.contains(asset.localIdentifier) {
                             GridCellView(
                                 assets: assets,
@@ -369,13 +387,68 @@ private struct MemoriesGridView: View {
                                     deletePhoto(asset: asset)
                                 }
                             )
+                            .background(
+                                GeometryReader { itemGeo in
+                                    Color.clear
+                                        .preference(
+                                            key: ScrollOffsetPreferenceKey.self,
+                                            value: itemGeo.frame(in: .named("scroll")).minY
+                                        )
+                                        .onAppear {
+                                            updateYearIfVisible(itemGeo: itemGeo, asset: asset)
+                                        }
+                                        .onChange(of: itemGeo.frame(in: .named("scroll")).minY) { _ in
+                                            updateYearIfVisible(itemGeo: itemGeo, asset: asset)
+                                        }
+                                }
+                            )
                         }
                     }
                 }
                 .padding(.horizontal, 0)
             }
+            .coordinateSpace(name: "scroll")
             .scrollIndicators(.hidden)
             .ignoresSafeArea(edges: .bottom)
+        }
+    }
+    
+    private func updateYearIfVisible(itemGeo: GeometryProxy, asset: PHAsset) {
+        let frame = itemGeo.frame(in: .named("scroll"))
+        
+        // Only check items near the top of the screen (between 80-180 points from top)
+        guard frame.minY > 80 && frame.minY < 180 else { return }
+        
+        guard let assetDate = asset.creationDate else { return }
+        let year = Calendar.current.component(.year, from: assetDate)
+        
+        if currentYear != year {
+            // Throttle year changes - only allow changes every 0.3 seconds
+            let timeSinceLastChange = Date().timeIntervalSince(lastYearChangeTime)
+            guard timeSinceLastChange > 0.3 else { return }
+            
+            lastYearChangeTime = Date()
+            withAnimation(.easeInOut(duration: 0.2)) {
+                currentYear = year
+                isScrolling = true
+            }
+        } else if !isScrolling {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isScrolling = true
+            }
+        }
+        
+        // Cancel previous hide task and schedule new one
+        hideYearTask?.cancel()
+        hideYearTask = Task {
+            try? await Task.sleep(nanoseconds: 800_000_000) // 0.8 seconds
+            if !Task.isCancelled {
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        isScrolling = false
+                    }
+                }
+            }
         }
     }
     

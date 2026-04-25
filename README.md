@@ -8,7 +8,7 @@ A privacy-first iOS app that shows you photos from this day in past years.
   <img src="https://img.shields.io/badge/License-MIT-green.svg" />
 </div>
 
-## 📱 About
+## About
 
 Timefold is like Timehop, but actually private. No ads, no account required, and nothing leaves your iPhone.
 
@@ -16,15 +16,16 @@ Every day, Timefold shows you photos taken on this date in previous years from y
 
 **[Download on the App Store](https://apps.apple.com/us/app/timefold-on-this-day/id6758055406)**
 
-## ✨ Features
+## Features
 
-- 📅 **Daily Memories** - Automatically shows photos from today's date in past years
-- 🔒 **100% Private** - No accounts, no analytics, no data collection
-- 📱 **Offline First** - Works entirely on your device using Apple Photos
-- 🎨 **Two View Modes** - Switch between grid and fullscreen viewing
-- 📸 **Instagram Story Ready** - Share memories with beautiful gradient backgrounds
-- 🌓 **Dark Mode** - Full support with custom dark mode icon
-- ⚡ **Fast & Lightweight** - Native SwiftUI, no dependencies
+- **Daily Reveal** - A cinematic opening experience on first launch each day: your memories materialize as scattered polaroids against a rotating retro backdrop, different every day for two weeks
+- **Daily Memories** - Automatically shows photos from today's date in past years
+- **100% Private** - No accounts, no analytics, no data collection
+- **Offline First** - Works entirely on your device using Apple Photos
+- **Two View Modes** - Switch between grid and fullscreen viewing
+- **Instagram Story Ready** - Share memories with beautiful gradient backgrounds
+- **Dark Mode** - Full support with custom dark mode icon
+- **Fast & Lightweight** - Native SwiftUI, no dependencies
 
 ## 🎯 Privacy First
 
@@ -72,6 +73,8 @@ Timefold is built with:
 - `MemoriesViewModel` - Photo fetching and filtering logic
 - `MemoryPagerView` - Fullscreen photo viewing with sharing
 - `MemoriesGridView` - Grid layout with delete functionality
+- `DailyRevealView` - Ceremonial first-open animation with retro Miami aesthetic
+- `TimefoldWidget` - Home and lock screen widgets
 
 ## 📸 Screenshots
 

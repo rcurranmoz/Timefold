@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var isSelecting = false
     @State private var selectedAssets: Set<String> = []
     @State private var showingDeleteConfirmation = false
+    @State private var showingReveal = false
 
     private var isCompact: Bool {
         (UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.screen.bounds.width ?? 375) < 375
@@ -81,7 +82,7 @@ struct ContentView: View {
                     VStack(spacing: isCompact ? 0.5 : 1) {
                         HStack(spacing: isCompact ? 2 : 3) {
                             Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: isCompact ? 13 : 15, weight: .semibold))
+                                .font(.system(size: isCompact ? 13 : 16, weight: .semibold))
                                 .foregroundStyle(
                                     LinearGradient(
                                         colors: [.orange, .pink],
@@ -90,7 +91,7 @@ struct ContentView: View {
                                     )
                                 )
                             Text("Timefold")
-                                .font(.system(size: isCompact ? 16 : 18, weight: .bold, design: .rounded))
+                                .font(.system(size: isCompact ? 16 : 20, weight: .bold, design: .rounded))
                                 .foregroundStyle(
                                     LinearGradient(
                                         colors: [.orange, .pink],
@@ -101,16 +102,16 @@ struct ContentView: View {
                         }
                         HStack(spacing: isCompact ? 2 : 3) {
                             Text(formatDateString(selectedDate))
-                                .font(.system(size: isCompact ? 9 : 10, weight: .medium))
+                                .font(.system(size: isCompact ? 9 : 11, weight: .medium))
                                 .foregroundStyle(.secondary)
-                            
+
                             if !Calendar.current.isDateInToday(selectedDate) {
                                 Button {
                                     selectedDate = Date()
                                     model.loadMemoriesFor(date: Date())
                                 } label: {
                                     Text("• Today")
-                                        .font(.system(size: isCompact ? 9 : 10, weight: .medium))
+                                        .font(.system(size: isCompact ? 9 : 11, weight: .medium))
                                         .foregroundStyle(.blue)
                                 }
                             }
@@ -224,8 +225,40 @@ struct ContentView: View {
         } message: {
             Text("This action cannot be undone.")
         }
+        .onChange(of: model.state) { newState in
+            if case .loaded = newState, shouldShowReveal() {
+                showingReveal = true
+            }
+        }
+        .overlay {
+            if showingReveal, case .loaded(let assets) = model.state {
+                DailyRevealView(assets: assets, date: selectedDate) {
+                    markRevealShown()
+                    withAnimation(.easeInOut(duration: 0.6)) {
+                        showingReveal = false
+                    }
+                }
+                .ignoresSafeArea()
+                .transition(.opacity)
+            }
+        }
     }
-    
+
+    private func shouldShowReveal() -> Bool {
+        #if DEBUG
+        return true
+        #else
+        guard Calendar.current.isDateInToday(selectedDate) else { return false }
+        let today = Calendar.current.startOfDay(for: Date())
+        guard let last = UserDefaults.standard.object(forKey: "lastRevealDate") as? Date else { return true }
+        return Calendar.current.startOfDay(for: last) < today
+        #endif
+    }
+
+    private func markRevealShown() {
+        UserDefaults.standard.set(Date(), forKey: "lastRevealDate")
+    }
+
     private func formatDateString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM d"
@@ -1025,20 +1058,16 @@ private struct PagedPhotoView: View {
         }
     }
     
-    // Helper function to constrain the offset so the image doesn't pan too far
     private func constrainOffset(_ offset: CGSize, scale: CGFloat, geo: GeometryProxy) -> CGSize {
         guard scale > 1.0 else { return .zero }
-        
-        // Calculate the maximum allowed offset based on the zoom level
         let maxOffsetX = (geo.size.width * (scale - 1)) / 2
         let maxOffsetY = (geo.size.height * (scale - 1)) / 2
-        
         return CGSize(
             width: min(max(offset.width, -maxOffsetX), maxOffsetX),
             height: min(max(offset.height, -maxOffsetY), maxOffsetY)
         )
     }
-    
+
     private func loadAndPlayVideo() {
         let options = PHVideoRequestOptions()
         options.isNetworkAccessAllowed = true
@@ -1524,6 +1553,244 @@ struct SettingsView: View {
                         dismiss()
                     }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Daily Reveal
+
+private struct DailyRevealView: View {
+    let assets: [PHAsset]
+    let date: Date
+    let onComplete: () -> Void
+
+    @State private var titleOpacity: Double = 0
+    @State private var titleOffset: CGFloat = 28
+    @State private var subtitleOpacity: Double = 0
+    @State private var revealedCount: Int = 0
+    @State private var hintOpacity: Double = 0
+    @State private var isDismissing = false
+    #if DEBUG
+    @State private var debugBackdropIndex: Int? = nil
+    #endif
+
+    private static let backgrounds: [(Color, Color)] = [
+        (.black, .black),                                                                                   // pure black
+        (Color(red: 0.06, green: 0.00, blue: 0.14), Color(red: 0.02, green: 0.00, blue: 0.08)),           // deep violet
+        (Color(red: 0.00, green: 0.04, blue: 0.14), Color(red: 0.00, green: 0.02, blue: 0.08)),           // deep navy
+        (Color(red: 0.10, green: 0.01, blue: 0.02), Color(red: 0.05, green: 0.00, blue: 0.01)),           // deep crimson
+        (Color(red: 0.00, green: 0.08, blue: 0.08), Color(red: 0.00, green: 0.03, blue: 0.04)),           // deep teal
+        (Color(red: 0.10, green: 0.05, blue: 0.00), Color(red: 0.05, green: 0.02, blue: 0.00)),           // deep amber
+        (Color(red: 0.10, green: 0.00, blue: 0.08), Color(red: 0.05, green: 0.00, blue: 0.04)),           // deep magenta
+        (Color(red: 0.00, green: 0.02, blue: 0.14), Color(red: 0.00, green: 0.01, blue: 0.08)),           // deep cobalt
+        (Color(red: 0.02, green: 0.08, blue: 0.02), Color(red: 0.01, green: 0.04, blue: 0.01)),           // deep forest
+        (Color(red: 0.00, green: 0.08, blue: 0.10), Color(red: 0.00, green: 0.03, blue: 0.05)),           // dark cyan
+        (Color(red: 0.10, green: 0.02, blue: 0.05), Color(red: 0.05, green: 0.01, blue: 0.02)),           // dark rose
+        (Color(red: 0.07, green: 0.04, blue: 0.00), Color(red: 0.04, green: 0.02, blue: 0.00)),           // dark bourbon
+        (Color(red: 0.04, green: 0.02, blue: 0.12), Color(red: 0.02, green: 0.01, blue: 0.06)),           // dark indigo
+        (Color(red: 0.08, green: 0.04, blue: 0.04), Color(red: 0.04, green: 0.02, blue: 0.02)),           // dark ember
+    ]
+
+    private var backgroundColors: (Color, Color) {
+        #if DEBUG
+        let index = debugBackdropIndex ?? (Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0)
+        #else
+        let index = Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0
+        #endif
+        return Self.backgrounds[index % Self.backgrounds.count]
+    }
+
+    private var previewAssets: [PHAsset] {
+        Array(assets.reversed().prefix(photoLayouts.count))
+    }
+
+    private var dateString: String {
+        let f = DateFormatter()
+        f.dateFormat = "MMMM d"
+        return f.string(from: date)
+    }
+
+    private var memoryCountString: String {
+        let count = assets.count
+        let years = Set(assets.compactMap { $0.creationDate }.map {
+            Calendar.current.component(.year, from: $0)
+        }).count
+        let noun = count == 1 ? "memory" : "memories"
+        return years > 1 ? "\(count) \(noun) across \(years) years" : "\(count) \(noun)"
+    }
+
+    private let photoLayouts: [(CGSize, Double)] = [
+        (CGSize(width: -75, height: -18), -8.0),
+        (CGSize(width: 68,  height: -48),  7.5),
+        (CGSize(width: 12,  height:  52), -3.5),
+        (CGSize(width: -58, height:  82), 12.0),
+        (CGSize(width: 90,  height:  36), -11.5),
+    ]
+
+    private static let miamiPink  = Color(red: 1.00, green: 0.18, blue: 0.33)   // brand pink
+    private static let miamiTeal  = Color(red: 1.00, green: 0.58, blue: 0.00)   // brand orange
+    private static let miamiCream = Color(red: 0.97, green: 0.93, blue: 0.86)
+    private static let miamiNight = Color(red: 0.04, green: 0.02, blue: 0.14)
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [backgroundColors.0, backgroundColors.1],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            // Scattered polaroid cards
+            ZStack {
+                ForEach(Array(previewAssets.enumerated()), id: \.element.localIdentifier) { index, asset in
+                    RevealPhotoCard(asset: asset)
+                        .opacity(index < revealedCount ? 1.0 : 0.0)
+                        .scaleEffect(index < revealedCount ? 1.0 : 0.88)
+                        .offset(
+                            x: photoLayouts[index].0.width,
+                            y: photoLayouts[index].0.height + (index < revealedCount ? 0 : 36)
+                        )
+                        .rotationEffect(.degrees(photoLayouts[index].1))
+                        .animation(.spring(response: 0.55, dampingFraction: 0.75), value: revealedCount)
+                }
+            }
+
+            // Night scrim
+            LinearGradient(
+                colors: [Self.miamiNight.opacity(0.9), .clear, Self.miamiNight.opacity(0.75)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            // CRT scan lines
+            Canvas { context, size in
+                var y: CGFloat = 0
+                while y < size.height {
+                    context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.07)))
+                    y += 3
+                }
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            // Date headline + count
+            VStack(spacing: 12) {
+                Text(dateString)
+                    .font(.system(size: 52, weight: .bold, design: .serif))
+                    .foregroundStyle(Self.miamiCream)
+                    .shadow(color: Self.miamiPink.opacity(1.0), radius: 6)
+                    .shadow(color: Self.miamiPink.opacity(0.6), radius: 20)
+                    .shadow(color: Self.miamiPink.opacity(0.25), radius: 50)
+                Text(memoryCountString.uppercased())
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .kerning(3)
+                    .foregroundStyle(Self.miamiTeal)
+                    .shadow(color: Self.miamiTeal.opacity(1.0), radius: 6)
+                    .shadow(color: Self.miamiTeal.opacity(0.6), radius: 20)
+                    .shadow(color: Self.miamiTeal.opacity(0.2), radius: 40)
+                    .opacity(subtitleOpacity)
+            }
+            .opacity(titleOpacity)
+            .offset(y: titleOffset)
+
+            // Tap hint
+            VStack {
+                Spacer()
+                Text("TAP TO CONTINUE")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .kerning(3)
+                    .foregroundStyle(Self.miamiPink.opacity(0.45))
+                    .shadow(color: Self.miamiPink.opacity(0.5), radius: 10)
+                    .padding(.bottom, 52)
+            }
+            .opacity(hintOpacity)
+
+            #if DEBUG
+            VStack {
+                HStack {
+                    Button {
+                        let current = debugBackdropIndex ?? (Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0)
+                        debugBackdropIndex = (current + 1) % Self.backgrounds.count
+                    } label: {
+                        Text("backdrop \((debugBackdropIndex ?? (Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0)) % Self.backgrounds.count + 1)/\(Self.backgrounds.count)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .padding(8)
+                            .background(.white.opacity(0.1))
+                            .clipShape(Capsule())
+                    }
+                    Spacer()
+                }
+                .padding(.top, 60)
+                .padding(.leading, 16)
+                Spacer()
+            }
+            #endif
+        }
+        .onTapGesture { completeDismiss() }
+        .task { await runSequence() }
+    }
+
+    private func runSequence() async {
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        withAnimation(.easeOut(duration: 0.5)) {
+            titleOpacity = 1
+            titleOffset = 0
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        withAnimation(.easeOut(duration: 0.35)) { subtitleOpacity = 1 }
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        for i in 0..<min(previewAssets.count, photoLayouts.count) {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            withAnimation { revealedCount = i + 1 }
+        }
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        withAnimation(.easeIn(duration: 0.3)) { hintOpacity = 1 }
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        completeDismiss()
+    }
+
+    private func completeDismiss() {
+        guard !isDismissing else { return }
+        isDismissing = true
+        onComplete()
+    }
+}
+
+private struct RevealPhotoCard: View {
+    let asset: PHAsset
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            Color.gray.opacity(0.15)
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            }
+        }
+        .frame(width: 148, height: 148)
+        .clipped()
+        .padding(10)
+        .background(Color(red: 0.94, green: 0.89, blue: 0.76))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .shadow(color: Color(red: 1.0, green: 0.18, blue: 0.33).opacity(0.3), radius: 14, y: 0)
+        .shadow(color: .black.opacity(0.6), radius: 8, y: 6)
+        .task {
+            let opts = PHImageRequestOptions()
+            opts.deliveryMode = .opportunistic
+            opts.resizeMode = .fast
+            opts.isNetworkAccessAllowed = true
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: CGSize(width: 300, height: 300),
+                contentMode: .aspectFill,
+                options: opts
+            ) { img, _ in
+                DispatchQueue.main.async { self.image = img }
             }
         }
     }

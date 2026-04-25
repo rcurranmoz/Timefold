@@ -16,7 +16,12 @@ struct ContentView: View {
     @State private var isSelecting = false
     @State private var selectedAssets: Set<String> = []
     @State private var showingDeleteConfirmation = false
-    
+    @State private var showingReveal = false
+
+    private var isCompact: Bool {
+        (UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.screen.bounds.width ?? 375) < 375
+    }
+
     enum ViewMode {
         case grid
         case fullscreen
@@ -74,12 +79,10 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    let isCompact = UIScreen.main.bounds.width < 375
-                    
                     VStack(spacing: isCompact ? 0.5 : 1) {
                         HStack(spacing: isCompact ? 2 : 3) {
                             Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: isCompact ? 13 : 15, weight: .semibold))
+                                .font(.system(size: isCompact ? 13 : 16, weight: .semibold))
                                 .foregroundStyle(
                                     LinearGradient(
                                         colors: [.orange, .pink],
@@ -88,7 +91,7 @@ struct ContentView: View {
                                     )
                                 )
                             Text("Timefold")
-                                .font(.system(size: isCompact ? 16 : 18, weight: .bold, design: .rounded))
+                                .font(.system(size: isCompact ? 16 : 20, weight: .bold, design: .rounded))
                                 .foregroundStyle(
                                     LinearGradient(
                                         colors: [.orange, .pink],
@@ -99,16 +102,16 @@ struct ContentView: View {
                         }
                         HStack(spacing: isCompact ? 2 : 3) {
                             Text(formatDateString(selectedDate))
-                                .font(.system(size: isCompact ? 9 : 10, weight: .medium))
+                                .font(.system(size: isCompact ? 9 : 11, weight: .medium))
                                 .foregroundStyle(.secondary)
-                            
+
                             if !Calendar.current.isDateInToday(selectedDate) {
                                 Button {
                                     selectedDate = Date()
                                     model.loadMemoriesFor(date: Date())
                                 } label: {
                                     Text("• Today")
-                                        .font(.system(size: isCompact ? 9 : 10, weight: .medium))
+                                        .font(.system(size: isCompact ? 9 : 11, weight: .medium))
                                         .foregroundStyle(.blue)
                                 }
                             }
@@ -222,8 +225,40 @@ struct ContentView: View {
         } message: {
             Text("This action cannot be undone.")
         }
+        .onChange(of: model.state) { newState in
+            if case .loaded = newState, shouldShowReveal() {
+                showingReveal = true
+            }
+        }
+        .overlay {
+            if showingReveal, case .loaded(let assets) = model.state {
+                DailyRevealView(assets: assets, date: selectedDate) {
+                    markRevealShown()
+                    withAnimation(.easeInOut(duration: 0.6)) {
+                        showingReveal = false
+                    }
+                }
+                .ignoresSafeArea()
+                .transition(.opacity)
+            }
+        }
     }
-    
+
+    private func shouldShowReveal() -> Bool {
+        #if DEBUG
+        return true
+        #else
+        guard Calendar.current.isDateInToday(selectedDate) else { return false }
+        let today = Calendar.current.startOfDay(for: Date())
+        guard let last = UserDefaults.standard.object(forKey: "lastRevealDate") as? Date else { return true }
+        return Calendar.current.startOfDay(for: last) < today
+        #endif
+    }
+
+    private func markRevealShown() {
+        UserDefaults.standard.set(Date(), forKey: "lastRevealDate")
+    }
+
     private func formatDateString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM d"
@@ -613,7 +648,7 @@ private struct AssetThumbnailView: View {
             contentMode: .aspectFill,
             options: opts
         ) { img, _ in
-            self.image = img
+            DispatchQueue.main.async { self.image = img }
         }
     }
 }
@@ -846,248 +881,7 @@ private struct MemoryPagerView: View {
     }
     
     private func createStoryImage(from image: UIImage, asset: PHAsset) -> UIImage? {
-        // Create a canvas sized for Instagram stories (9:16 aspect ratio)
-        // Using smaller size for better compatibility
-        let storySize = CGSize(width: 1080, height: 1920)  // Instagram's preferred size
-        
-        let renderer = UIGraphicsImageRenderer(size: storySize, format: UIGraphicsImageRendererFormat.default())
-        
-        let storyImage = renderer.image { context in
-            let ctx = context.cgContext
-            
-            // Background gradient
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let colors = [
-                UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 1.0).cgColor,
-                UIColor(red: 1.0, green: 0.18, blue: 0.33, alpha: 1.0).cgColor
-            ] as CFArray
-            
-            guard let gradient = CGGradient(
-                colorsSpace: colorSpace,
-                colors: colors,
-                locations: [0.0, 1.0]
-            ) else { return }
-            
-            ctx.drawLinearGradient(
-                gradient,
-                start: CGPoint(x: 0, y: 0),
-                end: CGPoint(x: storySize.width, y: storySize.height),
-                options: []
-            )
-            
-            // Calculate photo placement (centered, with padding)
-            let maxPhotoWidth = storySize.width - 180
-            let maxPhotoHeight = storySize.height - 600
-            
-            let imageAspect = image.size.width / image.size.height
-            let photoRect: CGRect
-            
-            if imageAspect > maxPhotoWidth / maxPhotoHeight {
-                // Width constrained
-                let width = maxPhotoWidth
-                let height = width / imageAspect
-                photoRect = CGRect(
-                    x: (storySize.width - width) / 2,
-                    y: 300,
-                    width: width,
-                    height: height
-                )
-            } else {
-                // Height constrained
-                let height = maxPhotoHeight
-                let width = height * imageAspect
-                photoRect = CGRect(
-                    x: (storySize.width - width) / 2,
-                    y: 300,
-                    width: width,
-                    height: height
-                )
-            }
-            
-            // LOGO BADGE - In background above photo, bigger and subtle
-            let logoY: CGFloat = 120  // Positioned in gradient area above photo
-            let badgeCornerRadius: CGFloat = 32
-            let badgeInternalPadding: CGFloat = 32
-            
-            // Logo dimensions - BIGGER (back to full size)
-            let clockRadius: CGFloat = 42
-            let dividerSpacing: CGFloat = 32
-            let dividerWidth: CGFloat = 4
-            
-            // Calculate text size first
-            let textAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 58, weight: .black),
-                .foregroundColor: UIColor.white,
-                .kern: 10
-            ]
-            let text = "TIMEFOLD" as NSString
-            let textSize = text.size(withAttributes: textAttrs)
-            
-            // Calculate badge dimensions
-            let badgeContentWidth = clockRadius * 2 + dividerSpacing + dividerWidth + dividerSpacing + textSize.width
-            let badgeContentHeight = max(clockRadius * 2, textSize.height)
-            let badgeWidth = badgeContentWidth + (badgeInternalPadding * 2)
-            let badgeHeight = badgeContentHeight + (badgeInternalPadding * 2)
-            
-            // Position badge centered horizontally, above photo in gradient background
-            let badgeX = (storySize.width - badgeWidth) / 2
-            let badgeY = logoY
-            let badgeRect = CGRect(x: badgeX, y: badgeY, width: badgeWidth, height: badgeHeight)
-            
-            // Draw rounded rectangle background with VERY SUBTLE shadow - blend into background
-            ctx.setShadow(offset: CGSize(width: 0, height: 3), blur: 10, color: UIColor.black.withAlphaComponent(0.15).cgColor)
-            let badgePath = UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeCornerRadius)
-            UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 0.35).setFill()  // Very subtle 35% opacity
-            badgePath.fill()
-            ctx.setShadow(offset: .zero, blur: 0, color: nil)
-            
-            // Calculate positions inside badge
-            let clockCenterX = badgeX + badgeInternalPadding + clockRadius
-            let clockCenterY = badgeY + badgeHeight / 2
-            
-            // Clock circle - WHITE with reduced opacity
-            let clockPath = UIBezierPath(arcCenter: CGPoint(x: clockCenterX, y: clockCenterY),
-                                          radius: clockRadius,
-                                          startAngle: 0,
-                                          endAngle: .pi * 2,
-                                          clockwise: true)
-            UIColor.white.withAlphaComponent(0.65).setStroke()  // 65% opacity for subtlety
-            clockPath.lineWidth = 5
-            clockPath.stroke()
-            
-            // Hour hand (pointing up) - WHITE with reduced opacity
-            let hourPath = UIBezierPath()
-            hourPath.move(to: CGPoint(x: clockCenterX, y: clockCenterY))
-            hourPath.addLine(to: CGPoint(x: clockCenterX, y: clockCenterY - clockRadius * 0.6))
-            hourPath.lineWidth = 5
-            hourPath.lineCapStyle = .round
-            UIColor.white.withAlphaComponent(0.65).setStroke()
-            hourPath.stroke()
-            
-            // Minute hand (pointing right-ish) - WHITE with reduced opacity
-            let minutePath = UIBezierPath()
-            minutePath.move(to: CGPoint(x: clockCenterX, y: clockCenterY))
-            minutePath.addLine(to: CGPoint(x: clockCenterX + clockRadius * 0.5, y: clockCenterY + clockRadius * 0.2))
-            minutePath.lineWidth = 4.5
-            minutePath.lineCapStyle = .round
-            UIColor.white.withAlphaComponent(0.65).setStroke()
-            minutePath.stroke()
-            
-            // Center dot - WHITE with reduced opacity
-            let dotPath = UIBezierPath(arcCenter: CGPoint(x: clockCenterX, y: clockCenterY),
-                                        radius: 5.5,
-                                        startAngle: 0,
-                                        endAngle: .pi * 2,
-                                        clockwise: true)
-            UIColor.white.withAlphaComponent(0.65).setFill()
-            dotPath.fill()
-            
-            // Vertical divider line - WHITE with reduced opacity
-            let dividerX = clockCenterX + clockRadius + dividerSpacing
-            let dividerHeight = badgeContentHeight * 0.6
-            let dividerPath = UIBezierPath()
-            dividerPath.move(to: CGPoint(x: dividerX, y: clockCenterY - dividerHeight / 2))
-            dividerPath.addLine(to: CGPoint(x: dividerX, y: clockCenterY + dividerHeight / 2))
-            dividerPath.lineWidth = dividerWidth
-            UIColor.white.withAlphaComponent(0.65).setStroke()
-            dividerPath.stroke()
-            
-            // TIMEFOLD text - WHITE with reduced opacity
-            let textX = dividerX + dividerSpacing
-            let textY = clockCenterY - textSize.height / 2
-            let subtleTextAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 58, weight: .black),
-                .foregroundColor: UIColor.white.withAlphaComponent(0.65),  // 65% opacity
-                .kern: 10
-            ]
-            (text as NSString).draw(at: CGPoint(x: textX, y: textY), withAttributes: subtleTextAttrs)
-            
-            // Draw white rounded border around photo
-            let borderRect = photoRect.insetBy(dx: -30, dy: -30)
-            let borderPath = UIBezierPath(roundedRect: borderRect, cornerRadius: 24)
-            ctx.setFillColor(UIColor.white.cgColor)
-            ctx.setShadow(offset: CGSize(width: 0, height: 15), blur: 45, color: UIColor.black.withAlphaComponent(0.3).cgColor)
-            borderPath.fill()
-            ctx.setShadow(offset: .zero, blur: 0, color: nil)
-            
-            // Draw the photo with rounded corners
-            ctx.saveGState()
-            let photoPath = UIBezierPath(roundedRect: photoRect, cornerRadius: 18)
-            photoPath.addClip()
-            image.draw(in: photoRect)
-            ctx.restoreGState()
-            
-            // Text overlay at bottom
-            let dateText = formattedDateForStory(asset.creationDate)
-            let yearsText = yearsAgoForStory(asset.creationDate)
-            ctx.setShadow(offset: .zero, blur: 0, color: nil)
-            
-            // Date text
-            let dateAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 72, weight: .bold),
-                .foregroundColor: UIColor.white
-            ]
-            let dateString = dateText as NSString
-            let dateSize = dateString.size(withAttributes: dateAttrs)
-            ctx.setShadow(offset: CGSize(width: 0, height: 4), blur: 12, color: UIColor.black.withAlphaComponent(0.3).cgColor)
-            dateString.draw(
-                at: CGPoint(x: (storySize.width - dateSize.width) / 2, y: photoRect.maxY + 75),
-                withAttributes: dateAttrs
-            )
-            
-            // Years ago text
-            let yearsAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 54, weight: .medium),
-                .foregroundColor: UIColor.white.withAlphaComponent(0.9)
-            ]
-            let yearsString = yearsText as NSString
-            let yearsSize = yearsString.size(withAttributes: yearsAttrs)
-            yearsString.draw(
-                at: CGPoint(x: (storySize.width - yearsSize.width) / 2, y: photoRect.maxY + 165),
-                withAttributes: yearsAttrs
-            )
-            ctx.setShadow(offset: .zero, blur: 0, color: nil)
-        }
-        
-        return storyImage
-    }
-    
-    private func formattedDateForStory(_ date: Date?) -> String {
-        guard let date else { return "" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMMM d, yyyy"
-        return formatter.string(from: date)
-    }
-    
-    private func yearsAgoForStory(_ date: Date?) -> String {
-        guard let date else { return "" }
-        
-        // Calculate actual years elapsed
-        let calendar = Calendar.current
-        let now = Date()
-        
-        let dateYear = calendar.component(.year, from: date)
-        let nowYear = calendar.component(.year, from: now)
-        
-        let dateMonthDay = calendar.dateComponents([.month, .day], from: date)
-        let nowMonthDay = calendar.dateComponents([.month, .day], from: now)
-        
-        var yearsAgo = nowYear - dateYear
-        
-        if let dateMonth = dateMonthDay.month, let dateDay = dateMonthDay.day,
-           let nowMonth = nowMonthDay.month, let nowDay = nowMonthDay.day {
-            if nowMonth < dateMonth || (nowMonth == dateMonth && nowDay < dateDay) {
-                yearsAgo -= 1
-            }
-        }
-        
-        if yearsAgo <= 0 {
-            return "Today"
-        } else if yearsAgo == 1 {
-            return "1 year ago today"
-        } else {
-            return "\(yearsAgo) years ago today"
-        }
+        makeStoryImage(from: image, asset: asset, canvasSize: CGSize(width: 1080, height: 1920))
     }
 
     private func yearsAgoText(from date: Date?) -> String {
@@ -1150,6 +944,8 @@ private struct PagedPhotoView: View {
     @State private var image: UIImage?
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
     @State private var player: AVPlayer?
     @State private var isPlaying = false
 
@@ -1184,48 +980,62 @@ private struct PagedPhotoView: View {
                             .foregroundStyle(.white)
                     }
                 } else {
-                    // PHOTO VIEW (existing code)
+                    // PHOTO VIEW with zoom and pan support
                     if let image {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
                             .scaleEffect(scale)
+                            .offset(offset)
                             .gesture(
                                 MagnifyGesture()
                                     .onChanged { value in
-                                        // Don't allow zoom while dismissing
                                         guard dragOffset == 0 else { return }
-                                        scale = lastScale * value.magnification
+                                        let newScale = lastScale * value.magnification
+                                        scale = min(max(newScale, 1.0), 4.0)
                                     }
                                     .onEnded { _ in
-                                        withAnimation(.spring(response: 0.3)) {
-                                            if scale < 1.0 {
-                                                scale = 1.0
-                                            } else if scale > 4.0 {
-                                                scale = 4.0
+                                        lastScale = scale
+                                        if scale <= 1.0 {
+                                            withAnimation(.spring(response: 0.3)) {
+                                                scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero
                                             }
-                                            lastScale = scale
                                         }
                                     }
                             )
-                            .onTapGesture(count: 2) {
+                            .gesture(
+                                DragGesture()
+                                    .onChanged { value in
+                                        guard dragOffset == 0 else { return }
+                                        let newOffset = CGSize(
+                                            width: lastOffset.width + value.translation.width,
+                                            height: lastOffset.height + value.translation.height
+                                        )
+                                        offset = constrainOffset(newOffset, scale: scale, geo: geo)
+                                    }
+                                    .onEnded { _ in lastOffset = offset },
+                                including: scale > 1.0 ? .all : .none
+                            )
+                            .onTapGesture(count: 2) { location in
                                 guard dragOffset == 0 else { return }
                                 withAnimation(.spring(response: 0.3)) {
                                     if scale > 1.0 {
-                                        scale = 1.0
-                                        lastScale = 1.0
+                                        scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero
                                     } else {
-                                        scale = 2.0
-                                        lastScale = 2.0
+                                        scale = 2.0; lastScale = 2.0
+                                        let tapPoint = CGPoint(
+                                            x: location.x - geo.size.width / 2,
+                                            y: location.y - geo.size.height / 2
+                                        )
+                                        offset = CGSize(width: -tapPoint.x * 0.5, height: -tapPoint.y * 0.5)
+                                        lastOffset = offset
                                     }
                                 }
                             }
                             .onChange(of: dragOffset) {
-                                // Reset zoom when starting to dismiss
                                 if dragOffset > 0 && scale != 1.0 {
                                     withAnimation(.spring(response: 0.2)) {
-                                        scale = 1.0
-                                        lastScale = 1.0
+                                        scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero
                                     }
                                 }
                             }
@@ -1248,6 +1058,16 @@ private struct PagedPhotoView: View {
         }
     }
     
+    private func constrainOffset(_ offset: CGSize, scale: CGFloat, geo: GeometryProxy) -> CGSize {
+        guard scale > 1.0 else { return .zero }
+        let maxOffsetX = (geo.size.width * (scale - 1)) / 2
+        let maxOffsetY = (geo.size.height * (scale - 1)) / 2
+        return CGSize(
+            width: min(max(offset.width, -maxOffsetX), maxOffsetX),
+            height: min(max(offset.height, -maxOffsetY), maxOffsetY)
+        )
+    }
+
     private func loadAndPlayVideo() {
         let options = PHVideoRequestOptions()
         options.isNetworkAccessAllowed = true
@@ -1277,255 +1097,19 @@ private struct PagedPhotoView: View {
             contentMode: .aspectFit,
             options: opts
         ) { img, _ in
-            self.image = img
-            // Notify parent immediately when image loads
-            if let img {
-                self.onImageReady(img)
-                // Generate story image in background
-                Task.detached(priority: .utility) {
-                    let storyImage = await self.createStoryImageAsync(from: img, asset: self.asset)
-                    await MainActor.run {
-                        self.onStoryImageReady(storyImage)
+            DispatchQueue.main.async {
+                self.image = img
+                if let img {
+                    self.onImageReady(img)
+                    Task.detached(priority: .utility) {
+                        let storyImage = makeStoryImage(from: img, asset: self.asset, canvasSize: CGSize(width: 720, height: 1280))
+                        await MainActor.run { self.onStoryImageReady(storyImage) }
                     }
                 }
             }
         }
     }
     
-    private func createStoryImageAsync(from image: UIImage, asset: PHAsset) async -> UIImage? {
-        return await Task.detached(priority: .utility) {
-            let storySize = CGSize(width: 720, height: 1280)
-            let renderer = UIGraphicsImageRenderer(size: storySize)
-            
-            return renderer.image { context in
-                let ctx = context.cgContext
-                
-                let colorSpace = CGColorSpaceCreateDeviceRGB()
-                let colors = [
-                    UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 1.0).cgColor,
-                    UIColor(red: 1.0, green: 0.18, blue: 0.33, alpha: 1.0).cgColor
-                ] as CFArray
-                
-                guard let gradient = CGGradient(
-                    colorsSpace: colorSpace,
-                    colors: colors,
-                    locations: [0.0, 1.0]
-                ) else { return }
-                
-                ctx.drawLinearGradient(
-                    gradient,
-                    start: CGPoint(x: 0, y: 0),
-                    end: CGPoint(x: storySize.width, y: storySize.height),
-                    options: []
-                )
-                
-                let maxPhotoWidth = storySize.width - 120
-                let maxPhotoHeight = storySize.height - 400
-                
-                let imageAspect = image.size.width / image.size.height
-                let photoRect: CGRect
-                
-                if imageAspect > maxPhotoWidth / maxPhotoHeight {
-                    let width = maxPhotoWidth
-                    let height = width / imageAspect
-                    photoRect = CGRect(
-                        x: (storySize.width - width) / 2,
-                        y: 200,
-                        width: width,
-                        height: height
-                    )
-                } else {
-                    let height = maxPhotoHeight
-                    let width = height * imageAspect
-                    photoRect = CGRect(
-                        x: (storySize.width - width) / 2,
-                        y: 200,
-                        width: width,
-                        height: height
-                    )
-                }
-                
-                let borderRect = photoRect.insetBy(dx: -20, dy: -20)
-                let borderPath = UIBezierPath(roundedRect: borderRect, cornerRadius: 16)
-                ctx.setFillColor(UIColor.white.cgColor)
-                ctx.setShadow(offset: CGSize(width: 0, height: 10), blur: 30, color: UIColor.black.withAlphaComponent(0.3).cgColor)
-                borderPath.fill()
-                ctx.setShadow(offset: .zero, blur: 0, color: nil)
-                
-                // Draw the photo with rounded corners
-                ctx.saveGState()
-                let photoPath = UIBezierPath(roundedRect: photoRect, cornerRadius: 12)
-                photoPath.addClip()
-                image.draw(in: photoRect)
-                ctx.restoreGState()
-                
-                // LOGO BADGE - In background above photo, bigger and subtle (scaled for 720px)
-                let logoY: CGFloat = 80  // Positioned in gradient area above photo
-                let badgeCornerRadius: CGFloat = 21
-                let badgeInternalPadding: CGFloat = 21
-                
-                // Logo dimensions - BIGGER for 720px canvas
-                let clockRadius: CGFloat = 28
-                let dividerSpacing: CGFloat = 21
-                let dividerWidth: CGFloat = 2.7
-                
-                // Calculate text size first
-                let textAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 39, weight: .black),  // Scaled proportionally
-                    .foregroundColor: UIColor.white,
-                    .kern: 6.7
-                ]
-                let text = "TIMEFOLD" as NSString
-                let textSize = text.size(withAttributes: textAttrs)
-                
-                // Calculate badge dimensions
-                let badgeContentWidth = clockRadius * 2 + dividerSpacing + dividerWidth + dividerSpacing + textSize.width
-                let badgeContentHeight = max(clockRadius * 2, textSize.height)
-                let badgeWidth = badgeContentWidth + (badgeInternalPadding * 2)
-                let badgeHeight = badgeContentHeight + (badgeInternalPadding * 2)
-                
-                // Position badge centered horizontally, above photo in gradient background
-                let badgeX = (storySize.width - badgeWidth) / 2
-                let badgeY = logoY
-                let badgeRect = CGRect(x: badgeX, y: badgeY, width: badgeWidth, height: badgeHeight)
-                
-                // Draw rounded rectangle background with VERY SUBTLE shadow - blend into background
-                ctx.setShadow(offset: CGSize(width: 0, height: 2), blur: 7, color: UIColor.black.withAlphaComponent(0.15).cgColor)
-                let badgePath = UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeCornerRadius)
-                UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 0.35).setFill()  // Very subtle 35% opacity
-                badgePath.fill()
-                ctx.setShadow(offset: .zero, blur: 0, color: nil)
-                
-                // Calculate positions inside badge
-                let clockCenterX = badgeX + badgeInternalPadding + clockRadius
-                let clockCenterY = badgeY + badgeHeight / 2
-                
-                // Clock circle - WHITE with reduced opacity
-                let clockPath = UIBezierPath(arcCenter: CGPoint(x: clockCenterX, y: clockCenterY),
-                                              radius: clockRadius,
-                                              startAngle: 0,
-                                              endAngle: .pi * 2,
-                                              clockwise: true)
-                UIColor.white.withAlphaComponent(0.65).setStroke()  // 65% opacity for subtlety
-                clockPath.lineWidth = 3.3
-                clockPath.stroke()
-                
-                // Hour hand (pointing up) - WHITE with reduced opacity
-                let hourPath = UIBezierPath()
-                hourPath.move(to: CGPoint(x: clockCenterX, y: clockCenterY))
-                hourPath.addLine(to: CGPoint(x: clockCenterX, y: clockCenterY - clockRadius * 0.6))
-                hourPath.lineWidth = 3.3
-                hourPath.lineCapStyle = .round
-                UIColor.white.withAlphaComponent(0.65).setStroke()
-                hourPath.stroke()
-                
-                // Minute hand (pointing right-ish) - WHITE with reduced opacity
-                let minutePath = UIBezierPath()
-                minutePath.move(to: CGPoint(x: clockCenterX, y: clockCenterY))
-                minutePath.addLine(to: CGPoint(x: clockCenterX + clockRadius * 0.5, y: clockCenterY + clockRadius * 0.2))
-                minutePath.lineWidth = 3
-                minutePath.lineCapStyle = .round
-                UIColor.white.withAlphaComponent(0.65).setStroke()
-                minutePath.stroke()
-                
-                // Center dot - WHITE with reduced opacity
-                let dotPath = UIBezierPath(arcCenter: CGPoint(x: clockCenterX, y: clockCenterY),
-                                            radius: 3.7,
-                                            startAngle: 0,
-                                            endAngle: .pi * 2,
-                                            clockwise: true)
-                UIColor.white.withAlphaComponent(0.65).setFill()
-                dotPath.fill()
-                
-                // Vertical divider line - WHITE with reduced opacity
-                let dividerX = clockCenterX + clockRadius + dividerSpacing
-                let dividerHeight = badgeContentHeight * 0.6
-                let dividerPath = UIBezierPath()
-                dividerPath.move(to: CGPoint(x: dividerX, y: clockCenterY - dividerHeight / 2))
-                dividerPath.addLine(to: CGPoint(x: dividerX, y: clockCenterY + dividerHeight / 2))
-                dividerPath.lineWidth = dividerWidth
-                UIColor.white.withAlphaComponent(0.65).setStroke()
-                dividerPath.stroke()
-                
-                // TIMEFOLD text - WHITE with reduced opacity
-                let textX = dividerX + dividerSpacing
-                let textY = clockCenterY - textSize.height / 2
-                let subtleTextAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 39, weight: .black),
-                    .foregroundColor: UIColor.white.withAlphaComponent(0.65),  // 65% opacity
-                    .kern: 6.7
-                ]
-                (text as NSString).draw(at: CGPoint(x: textX, y: textY), withAttributes: subtleTextAttrs)
-                
-                let dateText = self.formattedDateForStory(asset.creationDate)
-                let yearsText = self.yearsAgoForStory(asset.creationDate)
-                
-                // Date text - centered and clean
-                let dateAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 48, weight: .bold),
-                    .foregroundColor: UIColor.white
-                ]
-                let dateString = dateText as NSString
-                let dateSize = dateString.size(withAttributes: dateAttrs)
-                ctx.setShadow(offset: CGSize(width: 0, height: 3), blur: 8, color: UIColor.black.withAlphaComponent(0.3).cgColor)
-                dateString.draw(
-                    at: CGPoint(x: (storySize.width - dateSize.width) / 2, y: photoRect.maxY + 50),
-                    withAttributes: dateAttrs
-                )
-                
-                // Years ago text
-                let yearsAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 36, weight: .medium),
-                    .foregroundColor: UIColor.white.withAlphaComponent(0.9)
-                ]
-                let yearsString = yearsText as NSString
-                let yearsSize = yearsString.size(withAttributes: yearsAttrs)
-                yearsString.draw(
-                    at: CGPoint(x: (storySize.width - yearsSize.width) / 2, y: photoRect.maxY + 110),
-                    withAttributes: yearsAttrs
-                )
-                ctx.setShadow(offset: .zero, blur: 0, color: nil)
-            }
-        }.value
-    }
-    
-    private func formattedDateForStory(_ date: Date?) -> String {
-        guard let date else { return "" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMMM d, yyyy"
-        return formatter.string(from: date)
-    }
-    
-    private func yearsAgoForStory(_ date: Date?) -> String {
-        guard let date else { return "" }
-        
-        // Calculate actual years elapsed
-        let calendar = Calendar.current
-        let now = Date()
-        
-        let dateYear = calendar.component(.year, from: date)
-        let nowYear = calendar.component(.year, from: now)
-        
-        let dateMonthDay = calendar.dateComponents([.month, .day], from: date)
-        let nowMonthDay = calendar.dateComponents([.month, .day], from: now)
-        
-        var yearsAgo = nowYear - dateYear
-        
-        if let dateMonth = dateMonthDay.month, let dateDay = dateMonthDay.day,
-           let nowMonth = nowMonthDay.month, let nowDay = nowMonthDay.day {
-            if nowMonth < dateMonth || (nowMonth == dateMonth && nowDay < dateDay) {
-                yearsAgo -= 1
-            }
-        }
-        
-        if yearsAgo <= 0 {
-            return "Today"
-        } else if yearsAgo == 1 {
-            return "1 year ago today"
-        } else {
-            return "\(yearsAgo) years ago today"
-        }
-    }
 }
 
 final class MemoriesViewModel: ObservableObject {
@@ -1591,50 +1175,51 @@ final class MemoriesViewModel: ObservableObject {
     
     func loadMemoriesFor(date: Date) {
         state = .loading
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let assets = Self.fetchMemories(for: date)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.state = assets.isEmpty ? .empty : .loaded(assets)
+                if !assets.isEmpty {
+                    SharedMemoriesManager.shared.saveMemoryCount(assets.count)
+                    if let randomAsset = assets.randomElement() {
+                        SharedMemoriesManager.shared.saveWidgetThumbnail(from: randomAsset)
+                    }
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
+            }
+        }
+    }
 
+    static func fetchMemories(for date: Date) -> [PHAsset] {
         let calendar = Calendar.current
         let day = calendar.component(.day, from: date)
         let month = calendar.component(.month, from: date)
         let selectedYear = calendar.component(.year, from: date)
 
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.predicate = NSPredicate(format: "mediaType == %d OR mediaType == %d", PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)
-
-        let results = PHAsset.fetchAssets(with: fetchOptions)
-
-        var assets: [PHAsset] = []
-        
-        // Iterate in order to preserve the sort
-        for i in 0..<results.count {
-            let asset = results.object(at: i)
-            guard let assetDate = asset.creationDate else { continue }
-            let aDay = calendar.component(.day, from: assetDate)
-            let aMonth = calendar.component(.month, from: assetDate)
-            let aYear = calendar.component(.year, from: assetDate)
-
-            // Skip photos from the selected year and future years
-            guard aYear < selectedYear else { continue }
-
-            if aDay == day && aMonth == month {
-                assets.append(asset)
-            }
+        var datePredicates: [NSPredicate] = []
+        for year in 1970..<selectedYear {
+            var comps = DateComponents()
+            comps.year = year; comps.month = month; comps.day = day
+            comps.hour = 0; comps.minute = 0; comps.second = 0
+            guard let start = calendar.date(from: comps),
+                  let end = calendar.date(byAdding: .day, value: 1, to: start) else { continue }
+            datePredicates.append(
+                NSPredicate(format: "creationDate >= %@ AND creationDate < %@", start as NSDate, end as NSDate)
+            )
         }
+        guard !datePredicates.isEmpty else { return [] }
 
-        DispatchQueue.main.async {
-            self.state = assets.isEmpty ? .empty : .loaded(assets)
-            
-            // Save for widget
-            if !assets.isEmpty {
-                SharedMemoriesManager.shared.saveMemoryCount(assets.count)
-                if let randomAsset = assets.randomElement() {
-                    SharedMemoriesManager.shared.saveWidgetThumbnail(from: randomAsset)
-                }
-                
-                // Tell widget to reload
-                WidgetCenter.shared.reloadAllTimelines()
-            }
-        }
+        let opts = PHFetchOptions()
+        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        opts.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "mediaType == %d OR mediaType == %d",
+                        PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue),
+            NSCompoundPredicate(orPredicateWithSubpredicates: datePredicates)
+        ])
+
+        let results = PHAsset.fetchAssets(with: opts)
+        return (0..<results.count).map { results.object(at: $0) }
     }
 }
 
@@ -1775,63 +1360,88 @@ class NotificationManager: ObservableObject {
     
     func scheduleNotificationCheck() {
         cancelNotifications()
-        
-        // Schedule a daily notification at the user's chosen time
-        let components = Calendar.current.dateComponents([.hour, .minute], from: notificationTime)
-        
-        var dateComponents = DateComponents()
-        dateComponents.hour = components.hour
-        dateComponents.minute = components.minute
-        
-        // This will fire daily at the chosen time
-        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
-        
-        // Elegant notification variations
-        let notifications = [
-            ("Your memories are ready", "Photos from this day in past years"),
-            ("Time to look back", "See what you were up to today"),
-            ("Memories from this day", "Tap to revisit the past"),
-            ("Your past awaits", "Photos from years ago are waiting"),
-            ("Ready to revisit today?", "See how this day looked before"),
-            ("Take a moment to look back", "Your photos from this day"),
-            ("What were you doing on this day?", "Find out in your memories"),
-            ("See what you were up to", "Photos from this day over the years")
-        ]
-        
-        let notification = notifications.randomElement() ?? notifications[0]
-        
-        let content = UNMutableNotificationContent()
-        content.title = notification.0
-        content.body = notification.1
-        content.sound = .default
-        
-        let request = UNNotificationRequest(
-            identifier: "dailyMemoriesCheck",
-            content: content,
-            trigger: trigger
-        )
-        
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("Error scheduling notification: \(error)")
+        guard isEnabled else { return }
+
+        let notifHour = Calendar.current.component(.hour, from: notificationTime)
+        let notifMinute = Calendar.current.component(.minute, from: notificationTime)
+        let minPhotos = minimumPhotos
+
+        Task.detached(priority: .utility) {
+            let calendar = Calendar.current
+            let now = Date()
+            var requests: [UNNotificationRequest] = []
+
+            for daysAhead in 1...30 {
+                guard let targetDate = calendar.date(byAdding: .day, value: daysAhead, to: now) else { continue }
+                let month = calendar.component(.month, from: targetDate)
+                let day = calendar.component(.day, from: targetDate)
+                let year = calendar.component(.year, from: targetDate)
+
+                let count = NotificationManager.countMemories(month: month, day: day, beforeYear: year)
+                guard count >= minPhotos else { continue }
+
+                var trigger = DateComponents()
+                trigger.year = year; trigger.month = month; trigger.day = day
+                trigger.hour = notifHour; trigger.minute = notifMinute
+
+                let message = NotificationManager.notificationMessages.randomElement() ?? NotificationManager.notificationMessages[0]
+                let content = UNMutableNotificationContent()
+                content.title = message.0
+                content.body = message.1
+                content.sound = .default
+
+                let id = "memoriesCheck_\(year)_\(String(format: "%02d", month))_\(String(format: "%02d", day))"
+                requests.append(UNNotificationRequest(
+                    identifier: id,
+                    content: content,
+                    trigger: UNCalendarNotificationTrigger(dateMatching: trigger, repeats: false)
+                ))
             }
+
+            let center = UNUserNotificationCenter.current()
+            for request in requests { center.add(request) { _ in } }
         }
     }
-    
+
     func cancelNotifications() {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(
-            withIdentifiers: ["dailyMemoriesCheck"]
-        )
-        UNUserNotificationCenter.current().removeDeliveredNotifications(
-            withIdentifiers: ["dailyMemoriesCheck"]
-        )
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["dailyMemoriesCheck"])
     }
-    
-    private func todayString() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMMM d"
-        return formatter.string(from: Date())
+
+    private static func countMemories(month: Int, day: Int, beforeYear: Int) -> Int {
+        let calendar = Calendar.current
+        var datePredicates: [NSPredicate] = []
+        for year in 1970..<beforeYear {
+            var comps = DateComponents()
+            comps.year = year; comps.month = month; comps.day = day
+            comps.hour = 0; comps.minute = 0; comps.second = 0
+            guard let start = calendar.date(from: comps),
+                  let end = calendar.date(byAdding: .day, value: 1, to: start) else { continue }
+            datePredicates.append(
+                NSPredicate(format: "creationDate >= %@ AND creationDate < %@", start as NSDate, end as NSDate)
+            )
+        }
+        guard !datePredicates.isEmpty else { return 0 }
+        let opts = PHFetchOptions()
+        opts.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "mediaType == %d OR mediaType == %d",
+                        PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue),
+            NSCompoundPredicate(orPredicateWithSubpredicates: datePredicates)
+        ])
+        opts.includeHiddenAssets = false
+        return PHAsset.fetchAssets(with: opts).count
     }
+
+    private static let notificationMessages: [(String, String)] = [
+        ("Your memories are ready", "Photos from this day in past years"),
+        ("Time to look back", "See what you were up to today"),
+        ("Memories from this day", "Tap to revisit the past"),
+        ("Your past awaits", "Photos from years ago are waiting"),
+        ("Ready to revisit today?", "See how this day looked before"),
+        ("Take a moment to look back", "Your photos from this day"),
+        ("What were you doing on this day?", "Find out in your memories"),
+        ("See what you were up to", "Photos from this day over the years")
+    ]
 }
 
 // MARK: - Date Picker View
@@ -1921,14 +1531,14 @@ struct SettingsView: View {
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("Get a notification each morning if you have memories to see today.")
+                    Text("Get a daily notification only on days when you have enough memories. Scheduled up to 30 days ahead each time you open the app.")
                 }
                 
                 Section {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.4")
+                        Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                             .foregroundStyle(.secondary)
                     }
                 } header: {
@@ -1948,9 +1558,402 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - Daily Reveal
+
+private struct DailyRevealView: View {
+    let assets: [PHAsset]
+    let date: Date
+    let onComplete: () -> Void
+
+    @State private var titleOpacity: Double = 0
+    @State private var titleOffset: CGFloat = 28
+    @State private var subtitleOpacity: Double = 0
+    @State private var revealedCount: Int = 0
+    @State private var hintOpacity: Double = 0
+    @State private var isDismissing = false
+    #if DEBUG
+    @State private var debugBackdropIndex: Int? = nil
+    #endif
+
+    private static let backgrounds: [(Color, Color)] = [
+        (.black, .black),                                                                                   // pure black
+        (Color(red: 0.06, green: 0.00, blue: 0.14), Color(red: 0.02, green: 0.00, blue: 0.08)),           // deep violet
+        (Color(red: 0.00, green: 0.04, blue: 0.14), Color(red: 0.00, green: 0.02, blue: 0.08)),           // deep navy
+        (Color(red: 0.10, green: 0.01, blue: 0.02), Color(red: 0.05, green: 0.00, blue: 0.01)),           // deep crimson
+        (Color(red: 0.00, green: 0.08, blue: 0.08), Color(red: 0.00, green: 0.03, blue: 0.04)),           // deep teal
+        (Color(red: 0.10, green: 0.05, blue: 0.00), Color(red: 0.05, green: 0.02, blue: 0.00)),           // deep amber
+        (Color(red: 0.10, green: 0.00, blue: 0.08), Color(red: 0.05, green: 0.00, blue: 0.04)),           // deep magenta
+        (Color(red: 0.00, green: 0.02, blue: 0.14), Color(red: 0.00, green: 0.01, blue: 0.08)),           // deep cobalt
+        (Color(red: 0.02, green: 0.08, blue: 0.02), Color(red: 0.01, green: 0.04, blue: 0.01)),           // deep forest
+        (Color(red: 0.00, green: 0.08, blue: 0.10), Color(red: 0.00, green: 0.03, blue: 0.05)),           // dark cyan
+        (Color(red: 0.10, green: 0.02, blue: 0.05), Color(red: 0.05, green: 0.01, blue: 0.02)),           // dark rose
+        (Color(red: 0.07, green: 0.04, blue: 0.00), Color(red: 0.04, green: 0.02, blue: 0.00)),           // dark bourbon
+        (Color(red: 0.04, green: 0.02, blue: 0.12), Color(red: 0.02, green: 0.01, blue: 0.06)),           // dark indigo
+        (Color(red: 0.08, green: 0.04, blue: 0.04), Color(red: 0.04, green: 0.02, blue: 0.02)),           // dark ember
+    ]
+
+    private var backgroundColors: (Color, Color) {
+        #if DEBUG
+        let index = debugBackdropIndex ?? (Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0)
+        #else
+        let index = Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0
+        #endif
+        return Self.backgrounds[index % Self.backgrounds.count]
+    }
+
+    private var previewAssets: [PHAsset] {
+        Array(assets.reversed().prefix(photoLayouts.count))
+    }
+
+    private var dateString: String {
+        let f = DateFormatter()
+        f.dateFormat = "MMMM d"
+        return f.string(from: date)
+    }
+
+    private var memoryCountString: String {
+        let count = assets.count
+        let years = Set(assets.compactMap { $0.creationDate }.map {
+            Calendar.current.component(.year, from: $0)
+        }).count
+        let noun = count == 1 ? "memory" : "memories"
+        return years > 1 ? "\(count) \(noun) across \(years) years" : "\(count) \(noun)"
+    }
+
+    private let photoLayouts: [(CGSize, Double)] = [
+        (CGSize(width: -75, height: -18), -8.0),
+        (CGSize(width: 68,  height: -48),  7.5),
+        (CGSize(width: 12,  height:  52), -3.5),
+        (CGSize(width: -58, height:  82), 12.0),
+        (CGSize(width: 90,  height:  36), -11.5),
+    ]
+
+    private static let miamiPink  = Color(red: 1.00, green: 0.18, blue: 0.33)   // brand pink
+    private static let miamiTeal  = Color(red: 1.00, green: 0.58, blue: 0.00)   // brand orange
+    private static let miamiCream = Color(red: 0.97, green: 0.93, blue: 0.86)
+    private static let miamiNight = Color(red: 0.04, green: 0.02, blue: 0.14)
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [backgroundColors.0, backgroundColors.1],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            // Scattered polaroid cards
+            ZStack {
+                ForEach(Array(previewAssets.enumerated()), id: \.element.localIdentifier) { index, asset in
+                    RevealPhotoCard(asset: asset)
+                        .opacity(index < revealedCount ? 1.0 : 0.0)
+                        .scaleEffect(index < revealedCount ? 1.0 : 0.88)
+                        .offset(
+                            x: photoLayouts[index].0.width,
+                            y: photoLayouts[index].0.height + (index < revealedCount ? 0 : 36)
+                        )
+                        .rotationEffect(.degrees(photoLayouts[index].1))
+                        .animation(.spring(response: 0.55, dampingFraction: 0.75), value: revealedCount)
+                }
+            }
+
+            // Night scrim
+            LinearGradient(
+                colors: [Self.miamiNight.opacity(0.9), .clear, Self.miamiNight.opacity(0.75)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            // CRT scan lines
+            Canvas { context, size in
+                var y: CGFloat = 0
+                while y < size.height {
+                    context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.07)))
+                    y += 3
+                }
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            // Date headline + count
+            VStack(spacing: 12) {
+                Text(dateString)
+                    .font(.system(size: 52, weight: .bold, design: .serif))
+                    .foregroundStyle(Self.miamiCream)
+                    .shadow(color: Self.miamiPink.opacity(1.0), radius: 6)
+                    .shadow(color: Self.miamiPink.opacity(0.6), radius: 20)
+                    .shadow(color: Self.miamiPink.opacity(0.25), radius: 50)
+                Text(memoryCountString.uppercased())
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .kerning(3)
+                    .foregroundStyle(Self.miamiTeal)
+                    .shadow(color: Self.miamiTeal.opacity(1.0), radius: 6)
+                    .shadow(color: Self.miamiTeal.opacity(0.6), radius: 20)
+                    .shadow(color: Self.miamiTeal.opacity(0.2), radius: 40)
+                    .opacity(subtitleOpacity)
+            }
+            .opacity(titleOpacity)
+            .offset(y: titleOffset)
+
+            // Tap hint
+            VStack {
+                Spacer()
+                Text("TAP TO CONTINUE")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .kerning(3)
+                    .foregroundStyle(Self.miamiPink.opacity(0.45))
+                    .shadow(color: Self.miamiPink.opacity(0.5), radius: 10)
+                    .padding(.bottom, 52)
+            }
+            .opacity(hintOpacity)
+
+            #if DEBUG
+            VStack {
+                HStack {
+                    Button {
+                        let current = debugBackdropIndex ?? (Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0)
+                        debugBackdropIndex = (current + 1) % Self.backgrounds.count
+                    } label: {
+                        Text("backdrop \((debugBackdropIndex ?? (Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0)) % Self.backgrounds.count + 1)/\(Self.backgrounds.count)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .padding(8)
+                            .background(.white.opacity(0.1))
+                            .clipShape(Capsule())
+                    }
+                    Spacer()
+                }
+                .padding(.top, 60)
+                .padding(.leading, 16)
+                Spacer()
+            }
+            #endif
+        }
+        .onTapGesture { completeDismiss() }
+        .task { await runSequence() }
+    }
+
+    private func runSequence() async {
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        withAnimation(.easeOut(duration: 0.5)) {
+            titleOpacity = 1
+            titleOffset = 0
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        withAnimation(.easeOut(duration: 0.35)) { subtitleOpacity = 1 }
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        for i in 0..<min(previewAssets.count, photoLayouts.count) {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            withAnimation { revealedCount = i + 1 }
+        }
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        withAnimation(.easeIn(duration: 0.3)) { hintOpacity = 1 }
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        completeDismiss()
+    }
+
+    private func completeDismiss() {
+        guard !isDismissing else { return }
+        isDismissing = true
+        onComplete()
+    }
+}
+
+private struct RevealPhotoCard: View {
+    let asset: PHAsset
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            Color.gray.opacity(0.15)
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            }
+        }
+        .frame(width: 148, height: 148)
+        .clipped()
+        .padding(10)
+        .background(Color(red: 0.94, green: 0.89, blue: 0.76))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .shadow(color: Color(red: 1.0, green: 0.18, blue: 0.33).opacity(0.3), radius: 14, y: 0)
+        .shadow(color: .black.opacity(0.6), radius: 8, y: 6)
+        .task {
+            let opts = PHImageRequestOptions()
+            opts.deliveryMode = .opportunistic
+            opts.resizeMode = .fast
+            opts.isNetworkAccessAllowed = true
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: CGSize(width: 300, height: 300),
+                contentMode: .aspectFill,
+                options: opts
+            ) { img, _ in
+                DispatchQueue.main.async { self.image = img }
+            }
+        }
+    }
+}
+
 // Safe array subscript extension
 extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
+}
+
+// MARK: - Shared Story Image Renderer
+
+private func makeStoryImage(from image: UIImage, asset: PHAsset, canvasSize: CGSize) -> UIImage? {
+    let scale = canvasSize.width / 1080.0
+
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1.0
+    let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
+
+    return renderer.image { context in
+        let ctx = context.cgContext
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let colors = [
+            UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 1.0).cgColor,
+            UIColor(red: 1.0, green: 0.18, blue: 0.33, alpha: 1.0).cgColor
+        ] as CFArray
+        guard let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: [0.0, 1.0]) else { return }
+        ctx.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: canvasSize.width, y: canvasSize.height), options: [])
+
+        let maxPhotoWidth = 900 * scale
+        let maxPhotoHeight = 1320 * scale
+        let photoY = 300 * scale
+
+        let imageAspect = image.size.width / image.size.height
+        let photoRect: CGRect
+        if imageAspect > maxPhotoWidth / maxPhotoHeight {
+            let width = maxPhotoWidth
+            let height = width / imageAspect
+            photoRect = CGRect(x: (canvasSize.width - width) / 2, y: photoY, width: width, height: height)
+        } else {
+            let height = maxPhotoHeight
+            let width = height * imageAspect
+            photoRect = CGRect(x: (canvasSize.width - width) / 2, y: photoY, width: width, height: height)
+        }
+
+        let logoY = 120 * scale
+        let badgeCornerRadius = 32 * scale
+        let badgePadding = 32 * scale
+        let clockRadius = 42 * scale
+        let dividerSpacing = 32 * scale
+        let dividerWidth = 4 * scale
+        let fontSize = 58 * scale
+        let kern = 10 * scale
+
+        let textAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: fontSize, weight: .black),
+            .foregroundColor: UIColor.white,
+            .kern: kern
+        ]
+        let text = "TIMEFOLD" as NSString
+        let textSize = text.size(withAttributes: textAttrs)
+
+        let badgeContentWidth = clockRadius * 2 + dividerSpacing + dividerWidth + dividerSpacing + textSize.width
+        let badgeContentHeight = max(clockRadius * 2, textSize.height)
+        let badgeWidth = badgeContentWidth + badgePadding * 2
+        let badgeHeight = badgeContentHeight + badgePadding * 2
+        let badgeX = (canvasSize.width - badgeWidth) / 2
+        let badgeRect = CGRect(x: badgeX, y: logoY, width: badgeWidth, height: badgeHeight)
+
+        ctx.setShadow(offset: CGSize(width: 0, height: 3 * scale), blur: 10 * scale, color: UIColor.black.withAlphaComponent(0.15).cgColor)
+        UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 0.35).setFill()
+        UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeCornerRadius).fill()
+        ctx.setShadow(offset: .zero, blur: 0, color: nil)
+
+        let clockCX = badgeX + badgePadding + clockRadius
+        let clockCY = logoY + badgeHeight / 2
+
+        UIColor.white.withAlphaComponent(0.65).setStroke()
+        let clockPath = UIBezierPath(arcCenter: CGPoint(x: clockCX, y: clockCY), radius: clockRadius, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+        clockPath.lineWidth = 5 * scale
+        clockPath.stroke()
+
+        let hourPath = UIBezierPath()
+        hourPath.move(to: CGPoint(x: clockCX, y: clockCY))
+        hourPath.addLine(to: CGPoint(x: clockCX, y: clockCY - clockRadius * 0.6))
+        hourPath.lineWidth = 5 * scale
+        hourPath.lineCapStyle = .round
+        UIColor.white.withAlphaComponent(0.65).setStroke()
+        hourPath.stroke()
+
+        let minutePath = UIBezierPath()
+        minutePath.move(to: CGPoint(x: clockCX, y: clockCY))
+        minutePath.addLine(to: CGPoint(x: clockCX + clockRadius * 0.5, y: clockCY + clockRadius * 0.2))
+        minutePath.lineWidth = 4.5 * scale
+        minutePath.lineCapStyle = .round
+        UIColor.white.withAlphaComponent(0.65).setStroke()
+        minutePath.stroke()
+
+        UIColor.white.withAlphaComponent(0.65).setFill()
+        UIBezierPath(arcCenter: CGPoint(x: clockCX, y: clockCY), radius: 5.5 * scale, startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
+
+        let dividerX = clockCX + clockRadius + dividerSpacing
+        let dividerHeight = badgeContentHeight * 0.6
+        let divPath = UIBezierPath()
+        divPath.move(to: CGPoint(x: dividerX, y: clockCY - dividerHeight / 2))
+        divPath.addLine(to: CGPoint(x: dividerX, y: clockCY + dividerHeight / 2))
+        divPath.lineWidth = dividerWidth
+        UIColor.white.withAlphaComponent(0.65).setStroke()
+        divPath.stroke()
+
+        let subtleAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: fontSize, weight: .black),
+            .foregroundColor: UIColor.white.withAlphaComponent(0.65),
+            .kern: kern
+        ]
+        text.draw(at: CGPoint(x: dividerX + dividerSpacing, y: clockCY - textSize.height / 2), withAttributes: subtleAttrs)
+
+        let borderRect = photoRect.insetBy(dx: -30 * scale, dy: -30 * scale)
+        ctx.setFillColor(UIColor.white.cgColor)
+        ctx.setShadow(offset: CGSize(width: 0, height: 15 * scale), blur: 45 * scale, color: UIColor.black.withAlphaComponent(0.3).cgColor)
+        UIBezierPath(roundedRect: borderRect, cornerRadius: 24 * scale).fill()
+        ctx.setShadow(offset: .zero, blur: 0, color: nil)
+
+        ctx.saveGState()
+        UIBezierPath(roundedRect: photoRect, cornerRadius: 18 * scale).addClip()
+        image.draw(in: photoRect)
+        ctx.restoreGState()
+
+        let dateText = storyFormattedDate(asset.creationDate) as NSString
+        let yearsText = storyYearsAgo(asset.creationDate) as NSString
+
+        let dateAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 72 * scale, weight: .bold),
+            .foregroundColor: UIColor.white
+        ]
+        let dateSize = dateText.size(withAttributes: dateAttrs)
+        ctx.setShadow(offset: CGSize(width: 0, height: 4 * scale), blur: 12 * scale, color: UIColor.black.withAlphaComponent(0.3).cgColor)
+        dateText.draw(at: CGPoint(x: (canvasSize.width - dateSize.width) / 2, y: photoRect.maxY + 75 * scale), withAttributes: dateAttrs)
+
+        let yearsAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 54 * scale, weight: .medium),
+            .foregroundColor: UIColor.white.withAlphaComponent(0.9)
+        ]
+        let yearsSize = yearsText.size(withAttributes: yearsAttrs)
+        yearsText.draw(at: CGPoint(x: (canvasSize.width - yearsSize.width) / 2, y: photoRect.maxY + 165 * scale), withAttributes: yearsAttrs)
+        ctx.setShadow(offset: .zero, blur: 0, color: nil)
+    }
+}
+
+private func storyFormattedDate(_ date: Date?) -> String {
+    guard let date else { return "" }
+    let formatter = DateFormatter()
+    formatter.dateFormat = "MMMM d, yyyy"
+    return formatter.string(from: date)
+}
+
+private func storyYearsAgo(_ date: Date?) -> String {
+    guard let date else { return "" }
+    let years = Calendar.current.dateComponents([.year], from: date, to: Date()).year ?? 0
+    if years <= 0 { return "Today" }
+    if years == 1 { return "1 year ago today" }
+    return "\(years) years ago today"
 }

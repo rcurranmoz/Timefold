@@ -1823,22 +1823,6 @@ private func makeStoryImage(from image: UIImage, asset: PHAsset, canvasSize: CGS
         guard let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: [0.0, 1.0]) else { return }
         ctx.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: canvasSize.width, y: canvasSize.height), options: [])
 
-        let maxPhotoWidth = 900 * scale
-        let maxPhotoHeight = 1320 * scale
-        let photoY = 300 * scale
-
-        let imageAspect = image.size.width / image.size.height
-        let photoRect: CGRect
-        if imageAspect > maxPhotoWidth / maxPhotoHeight {
-            let width = maxPhotoWidth
-            let height = width / imageAspect
-            photoRect = CGRect(x: (canvasSize.width - width) / 2, y: photoY, width: width, height: height)
-        } else {
-            let height = maxPhotoHeight
-            let width = height * imageAspect
-            photoRect = CGRect(x: (canvasSize.width - width) / 2, y: photoY, width: width, height: height)
-        }
-
         let logoY = 120 * scale
         let badgeCornerRadius = 32 * scale
         let badgePadding = 32 * scale
@@ -1862,6 +1846,39 @@ private func makeStoryImage(from image: UIImage, asset: PHAsset, canvasSize: CGS
         let badgeHeight = badgeContentHeight + badgePadding * 2
         let badgeX = (canvasSize.width - badgeWidth) / 2
         let badgeRect = CGRect(x: badgeX, y: logoY, width: badgeWidth, height: badgeHeight)
+
+        let dateText = storyFormattedDate(asset.creationDate) as NSString
+        let yearsText = storyYearsAgo(asset.creationDate) as NSString
+        let dateAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 72 * scale, weight: .bold),
+            .foregroundColor: UIColor.white
+        ]
+        let yearsAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 54 * scale, weight: .medium),
+            .foregroundColor: UIColor.white.withAlphaComponent(0.9)
+        ]
+        let dateSize = dateText.size(withAttributes: dateAttrs)
+        let yearsSize = yearsText.size(withAttributes: yearsAttrs)
+
+        let maxPhotoWidth = 900 * scale
+        let maxPhotoHeight = 1200 * scale
+        let imageAspect = image.size.width / image.size.height
+        let photoWidth: CGFloat
+        let photoHeight: CGFloat
+        if imageAspect > maxPhotoWidth / maxPhotoHeight {
+            photoWidth = maxPhotoWidth
+            photoHeight = maxPhotoWidth / imageAspect
+        } else {
+            photoHeight = maxPhotoHeight
+            photoWidth = maxPhotoHeight * imageAspect
+        }
+
+        let textBlockHeight = 165 * scale + yearsSize.height
+        let logoBottom = logoY + badgeHeight
+        let availableHeight = canvasSize.height - logoBottom
+        let photoY = logoBottom + max(50 * scale, (availableHeight - photoHeight - textBlockHeight) / 2)
+
+        let photoRect = CGRect(x: (canvasSize.width - photoWidth) / 2, y: photoY, width: photoWidth, height: photoHeight)
 
         ctx.setShadow(offset: CGSize(width: 0, height: 3 * scale), blur: 10 * scale, color: UIColor.black.withAlphaComponent(0.15).cgColor)
         UIColor(red: 1.0, green: 0.58, blue: 0.0, alpha: 0.35).setFill()
@@ -1922,22 +1939,8 @@ private func makeStoryImage(from image: UIImage, asset: PHAsset, canvasSize: CGS
         image.draw(in: photoRect)
         ctx.restoreGState()
 
-        let dateText = storyFormattedDate(asset.creationDate) as NSString
-        let yearsText = storyYearsAgo(asset.creationDate) as NSString
-
-        let dateAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 72 * scale, weight: .bold),
-            .foregroundColor: UIColor.white
-        ]
-        let dateSize = dateText.size(withAttributes: dateAttrs)
         ctx.setShadow(offset: CGSize(width: 0, height: 4 * scale), blur: 12 * scale, color: UIColor.black.withAlphaComponent(0.3).cgColor)
         dateText.draw(at: CGPoint(x: (canvasSize.width - dateSize.width) / 2, y: photoRect.maxY + 75 * scale), withAttributes: dateAttrs)
-
-        let yearsAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 54 * scale, weight: .medium),
-            .foregroundColor: UIColor.white.withAlphaComponent(0.9)
-        ]
-        let yearsSize = yearsText.size(withAttributes: yearsAttrs)
         yearsText.draw(at: CGPoint(x: (canvasSize.width - yearsSize.width) / 2, y: photoRect.maxY + 165 * scale), withAttributes: yearsAttrs)
         ctx.setShadow(offset: .zero, blur: 0, color: nil)
     }

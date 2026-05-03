@@ -1052,9 +1052,9 @@ private struct PagedPhotoView: View {
             await loadFull()
         }
         .onDisappear {
-            // Stop video when leaving
             player?.pause()
             player = nil
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
     }
     
@@ -1076,6 +1076,10 @@ private struct PagedPhotoView: View {
         PHImageManager.default().requestPlayerItem(forVideo: asset, options: options) { playerItem, _ in
             DispatchQueue.main.async {
                 if let playerItem {
+                    // Override the ringer/silent switch so video audio always plays.
+                    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+                    try? AVAudioSession.sharedInstance().setActive(true)
+
                     self.player = AVPlayer(playerItem: playerItem)
                     self.player?.play()
                     self.isPlaying = true

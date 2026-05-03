@@ -659,6 +659,7 @@ private struct MemoryPagerView: View {
     var onDismiss: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
 
     @State private var selection: Int = 0
     @State private var showingShare = false
@@ -840,6 +841,11 @@ private struct MemoryPagerView: View {
                             shareItem = .video(asset)
                             isPreparingShare = false
                         }
+                    } else if !shareWithFrame, let currentImage {
+                        await MainActor.run {
+                            shareItem = .image(currentImage)
+                            isPreparingShare = false
+                        }
                     } else {
                         // For photos, prepare the story image
                         if let storyImage = currentStoryImage {
@@ -852,7 +858,7 @@ private struct MemoryPagerView: View {
                             let storyImage = await Task.detached(priority: .userInitiated) {
                                 return createStoryImage(from: currentImage, asset: asset) ?? currentImage
                             }.value
-                            
+
                             await MainActor.run {
                                 shareItem = .image(storyImage)
                                 isPreparingShare = false
@@ -1512,7 +1518,8 @@ struct DatePickerView: View {
 struct SettingsView: View {
     @ObservedObject var notificationManager: NotificationManager
     @Environment(\.dismiss) private var dismiss
-    
+    @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
+
     var body: some View {
         NavigationStack {
             Form {
@@ -1537,7 +1544,15 @@ struct SettingsView: View {
                 } footer: {
                     Text("Get a daily notification only on days when you have enough memories. Scheduled up to 30 days ahead each time you open the app.")
                 }
-                
+
+                Section {
+                    Toggle("Include Timefold Frame", isOn: $shareWithFrame)
+                } header: {
+                    Text("Sharing")
+                } footer: {
+                    Text("When on, shared photos include a branded card with the date. Turn off to share the original photo only.")
+                }
+
                 Section {
                     HStack {
                         Text("Version")

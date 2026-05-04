@@ -659,6 +659,7 @@ private struct MemoryPagerView: View {
     var onDismiss: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
 
     @State private var selection: Int = 0
     @State private var showingShare = false
@@ -840,6 +841,11 @@ private struct MemoryPagerView: View {
                             shareItem = .video(asset)
                             isPreparingShare = false
                         }
+                    } else if !shareWithFrame, let currentImage {
+                        await MainActor.run {
+                            shareItem = .image(currentImage)
+                            isPreparingShare = false
+                        }
                     } else {
                         // For photos, prepare the story image
                         if let storyImage = currentStoryImage {
@@ -852,7 +858,7 @@ private struct MemoryPagerView: View {
                             let storyImage = await Task.detached(priority: .userInitiated) {
                                 return createStoryImage(from: currentImage, asset: asset) ?? currentImage
                             }.value
-                            
+
                             await MainActor.run {
                                 shareItem = .image(storyImage)
                                 isPreparingShare = false
@@ -1052,9 +1058,9 @@ private struct PagedPhotoView: View {
             await loadFull()
         }
         .onDisappear {
-            // Stop video when leaving
             player?.pause()
             player = nil
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
     }
     
@@ -1076,6 +1082,10 @@ private struct PagedPhotoView: View {
         PHImageManager.default().requestPlayerItem(forVideo: asset, options: options) { playerItem, _ in
             DispatchQueue.main.async {
                 if let playerItem {
+                    // Override the ringer/silent switch so video audio always plays.
+                    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+                    try? AVAudioSession.sharedInstance().setActive(true)
+
                     self.player = AVPlayer(playerItem: playerItem)
                     self.player?.play()
                     self.isPlaying = true
@@ -1508,7 +1518,8 @@ struct DatePickerView: View {
 struct SettingsView: View {
     @ObservedObject var notificationManager: NotificationManager
     @Environment(\.dismiss) private var dismiss
-    
+    @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
+
     var body: some View {
         NavigationStack {
             Form {
@@ -1523,6 +1534,7 @@ struct SettingsView: View {
                         )
                         
                         Picker("Minimum Photos", selection: $notificationManager.minimumPhotos) {
+                            Text("1 photo").tag(1)
                             Text("3 photos").tag(3)
                             Text("5 photos").tag(5)
                             Text("10 photos").tag(10)
@@ -1533,7 +1545,15 @@ struct SettingsView: View {
                 } footer: {
                     Text("Get a daily notification only on days when you have enough memories. Scheduled up to 30 days ahead each time you open the app.")
                 }
-                
+
+                Section {
+                    Toggle("Include Timefold Frame", isOn: $shareWithFrame)
+                } header: {
+                    Text("Sharing")
+                } footer: {
+                    Text("When on, shared photos include a branded card with the date. Turn off to share the original photo only.")
+                }
+
                 Section {
                     HStack {
                         Text("Version")

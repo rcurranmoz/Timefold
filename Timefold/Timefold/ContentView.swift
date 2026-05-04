@@ -1534,6 +1534,7 @@ struct SettingsView: View {
                         )
                         
                         Picker("Minimum Photos", selection: $notificationManager.minimumPhotos) {
+                            Text("1 photo").tag(1)
                             Text("3 photos").tag(3)
                             Text("5 photos").tag(5)
                             Text("10 photos").tag(10)

@@ -354,6 +354,8 @@ private struct MemoriesGridView: View {
     private let spacing: CGFloat = 2
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
     
+    @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
+
     @State private var deletedAssets: Set<String> = []
     @State private var isScrolling = false
     @State private var currentYear: Int?
@@ -365,7 +367,7 @@ private struct MemoriesGridView: View {
             gridContent
             
             // Year badge overlay (only when scrolling)
-            if let year = currentYear {
+            if showFloatingYear, let year = currentYear {
                 VStack {
                     Spacer()
                     Text(String(year))
@@ -1519,6 +1521,7 @@ struct SettingsView: View {
     @ObservedObject var notificationManager: NotificationManager
     @Environment(\.dismiss) private var dismiss
     @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
+    @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
 
     var body: some View {
         NavigationStack {
@@ -1552,6 +1555,14 @@ struct SettingsView: View {
                     Text("Sharing")
                 } footer: {
                     Text("When on, shared photos include a branded card with the date. Turn off to share the original photo only.")
+                }
+
+                Section {
+                    Toggle("Floating Year", isOn: $showFloatingYear)
+                } header: {
+                    Text("Grid")
+                } footer: {
+                    Text("Show the year as a large overlay while scrolling through your memories.")
                 }
 
                 Section {

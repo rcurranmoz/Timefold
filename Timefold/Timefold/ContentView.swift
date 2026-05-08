@@ -1986,7 +1986,19 @@ private func storyFormattedDate(_ date: Date?) -> String {
 
 private func storyYearsAgo(_ date: Date?) -> String {
     guard let date else { return "" }
-    let years = Calendar.current.dateComponents([.year], from: date, to: Date()).year ?? 0
+    let calendar = Calendar.current
+    let now = Date()
+    let dateYear = calendar.component(.year, from: date)
+    let nowYear = calendar.component(.year, from: now)
+    let dateMonthDay = calendar.dateComponents([.month, .day], from: date)
+    let nowMonthDay = calendar.dateComponents([.month, .day], from: now)
+    var years = nowYear - dateYear
+    if let dateMonth = dateMonthDay.month, let dateDay = dateMonthDay.day,
+       let nowMonth = nowMonthDay.month, let nowDay = nowMonthDay.day {
+        if nowMonth < dateMonth || (nowMonth == dateMonth && nowDay < dateDay) {
+            years -= 1
+        }
+    }
     if years <= 0 { return "Today" }
     if years == 1 { return "1 year ago today" }
     return "\(years) years ago today"

@@ -2,6 +2,12 @@
 
 ## Current build (pending App Review)
 
+Bug fix: the "years ago today" label on the shared frame was sometimes off by a year, depending on the time of day. Now it matches what you see in the app.
+
+---
+
+## v1.6.1 (build 44)
+
 Two small wins for sharing. Videos now play sound even when your phone is on Silent — like every other app on your phone already does. And if you'd rather share the original photo without the Timefold frame, there's a new toggle in Settings. Both ways look good.
 
 ---

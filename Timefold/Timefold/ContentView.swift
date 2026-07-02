@@ -257,8 +257,10 @@ struct ContentView: View {
             model.start()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            // Reload when app comes to foreground (in case date changed)
-            model.loadMemoriesFor(date: selectedDate)
+            // Refresh on foreground only when the day rolled or the data is
+            // stale — hopping between apps shouldn't reload every time.
+            VisitTracker.recordVisit()
+            model.refreshIfNeeded(for: selectedDate)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             // Reload when system time/date changes (like manual date change)
@@ -1718,7 +1720,24 @@ final class MemoriesViewModel: ObservableObject {
         loadMemoriesFor(date: Date())
     }
     
+    /// Wall-clock of the last load kick-off — powers the foreground throttle.
+    private var lastLoadAt: Date?
+
+    /// Foreground refresh. A full reload blows the UI away, so rapid app
+    /// switching shouldn't trigger one: only reload when the calendar day
+    /// has rolled (the reason this hook exists) or the data has gone stale.
+    func refreshIfNeeded(for date: Date, maxAge: TimeInterval = 15 * 60) {
+        guard let last = lastLoadAt else {
+            loadMemoriesFor(date: date)
+            return
+        }
+        let dayRolled = !Calendar.current.isDate(last, inSameDayAs: Date())
+        guard dayRolled || Date().timeIntervalSince(last) > maxAge else { return }
+        loadMemoriesFor(date: date)
+    }
+
     func loadMemoriesFor(date: Date) {
+        lastLoadAt = Date()
         state = .loading
         Task.detached(priority: .userInitiated) { [weak self] in
             let assets = Self.fetchMemories(for: date)

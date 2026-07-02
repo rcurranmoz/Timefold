@@ -1,8 +1,35 @@
 # App Store Release Notes
 
-## v1.7 (build 46) — TestFlight
+## App Store description (updated for v1.7)
 
-Timefold got a warm makeover. Your daily memories now arrive like a hand of polaroids dealt across the table, with your companion there to greet you. The whole app follows the time of day — sunrise colors in the morning, cozy plum at night. Same photos, same privacy, way more heart.
+Timefold shows you photos from this day in past years — entirely on your device.
+
+Open it each morning and your memories arrive like a hand of polaroids, dealt out by a little companion who's happy you came back.
+
+- No accounts, no ads, no tracking
+- Works with your Apple Photos library
+- A warm daily reveal: photos from this day, across all your years
+- Pick your companion — Foldy, Luna, or Mochi
+- Unlock hats for them just by showing up — no purchases, time is the only currency
+- Once a day, your companion hides in one of your photos. Happy hunting.
+- Swipe through memories, share favorites, or delete unwanted photos
+- Complete privacy and control
+
+Your photos stay yours.
+
+---
+
+## v1.7 (build 51) — What's New
+
+Timefold got a warm makeover — same photos, same privacy, way more heart.
+
+- A new daily reveal: your memories deal out like a hand of polaroids
+- The whole app follows the time of day — sunrise colors in the morning, cozy plum at night
+- Meet your companions: Foldy, Luna, and Mochi. Pick your favorite in Settings.
+- Hats! Open the app on more days to unlock them. No purchases — time is the only currency here.
+- Hide and seek: once a day, your companion tucks itself into one of your photos
+- Optional daily reminder, offered right after your first reveal
+- Dozens of small polish fixes throughout
 
 ---
 

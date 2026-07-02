@@ -178,6 +178,15 @@ struct ContentView: View {
         (UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.screen.bounds.width ?? 375) < 375
     }
 
+    /// Whether the toolbar chrome (wordmark, gear, calendar…) has anything to
+    /// act on. Branded full-screen states carry their own identity.
+    private var hasContent: Bool {
+        switch model.state {
+        case .loaded, .empty: return true
+        default: return false
+        }
+    }
+
     enum ViewMode {
         case grid
         case fullscreen
@@ -236,31 +245,34 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.55), value: showingReveal)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Gate at the ToolbarItem level: on branded full-screen
+                // states even an *empty* item renders its glass container.
+                if hasContent {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: isCompact ? 0.5 : 1) {
-                        BrandWordmark(isCompact: isCompact)
-                        HStack(spacing: isCompact ? 2 : 3) {
-                            Text(formatDateString(selectedDate))
-                                .font(.system(size: isCompact ? 9 : 11, weight: .medium))
-                                .foregroundStyle(.secondary)
+                        VStack(spacing: isCompact ? 0.5 : 1) {
+                            BrandWordmark(isCompact: isCompact)
+                            HStack(spacing: isCompact ? 2 : 3) {
+                                Text(formatDateString(selectedDate))
+                                    .font(.system(size: isCompact ? 9 : 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
 
-                            if !Calendar.current.isDateInToday(selectedDate) {
-                                Button {
-                                    selectedDate = Date()
-                                    model.loadMemoriesFor(date: Date())
-                                } label: {
-                                    Text("• Today")
-                                        .font(.system(size: isCompact ? 9 : 11, weight: .medium))
-                                        .foregroundStyle(.blue)
+                                if !Calendar.current.isDateInToday(selectedDate) {
+                                    Button {
+                                        selectedDate = Date()
+                                        model.loadMemoriesFor(date: Date())
+                                    } label: {
+                                        Text("• Today")
+                                            .font(.system(size: isCompact ? 9 : 11, weight: .medium))
+                                            .foregroundStyle(.blue)
+                                    }
                                 }
                             }
                         }
-                    }
-                    .fixedSize()
-                    .transition(.scale.combined(with: .opacity))
-                    .animation(.spring(response: 0.4, dampingFraction: 0.7), value: model.state)
+                        .fixedSize()
+                        .transition(.scale.combined(with: .opacity))
+                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: model.state)
                 }
-                
+
                 ToolbarItem(placement: .topBarLeading) {
                     // Fixed frame container
                     HStack {
@@ -272,7 +284,7 @@ struct ContentView: View {
                     }
                     .frame(width: 44, height: 44)
                 }
-                
+
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
                         // Calendar button (only in grid mode)
@@ -283,51 +295,55 @@ struct ContentView: View {
                                 Image(systemName: "calendar")
                             }
                         }
-                        
-                        // View mode toggle button
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                // Clear selection when switching to fullscreen
-                                if viewMode == .grid {
-                                    isSelecting = false
-                                    selectedAssets.removeAll()
-                                }
-                                viewMode = viewMode == .grid ? .fullscreen : .grid
-                            }
-                        } label: {
-                            Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
-                        }
-                        
-                        // Select/Delete buttons (only when in grid mode with loaded assets)
-                        if case .loaded = model.state, viewMode == .grid {
-                            if isSelecting {
-                                Button("Cancel") {
-                                    withAnimation {
+
+                        // View mode toggle & select/delete only make sense
+                        // once memories are actually loaded
+                        if case .loaded = model.state {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    // Clear selection when switching to fullscreen
+                                    if viewMode == .grid {
                                         isSelecting = false
                                         selectedAssets.removeAll()
                                     }
+                                    viewMode = viewMode == .grid ? .fullscreen : .grid
                                 }
-                                
-                                Button(role: .destructive) {
-                                    showingDeleteConfirmation = true
-                                } label: {
-                                    Text("Delete")
-                                }
-                                .disabled(selectedAssets.isEmpty)
-                            } else {
-                                Button {
-                                    withAnimation {
-                                        isSelecting = true
+                            } label: {
+                                Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
+                            }
+
+                            // Select/Delete buttons (only in grid mode)
+                            if viewMode == .grid {
+                                if isSelecting {
+                                    Button("Cancel") {
+                                        withAnimation {
+                                            isSelecting = false
+                                            selectedAssets.removeAll()
+                                        }
                                     }
-                                } label: {
-                                    Image(systemName: "checkmark.circle")
+
+                                    Button(role: .destructive) {
+                                        showingDeleteConfirmation = true
+                                    } label: {
+                                        Text("Delete")
+                                    }
+                                    .disabled(selectedAssets.isEmpty)
+                                } else {
+                                    Button {
+                                        withAnimation {
+                                            isSelecting = true
+                                        }
+                                    } label: {
+                                        Image(systemName: "checkmark.circle")
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                } // if hasContent
             }
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(hasContent ? .visible : .hidden, for: .navigationBar)
         }
         .task {
             model.start()
@@ -616,36 +632,66 @@ private struct PolaroidFrame<Photo: View>: View {
 // MARK: - Branded States
 private struct BrandedLoadingView: View {
     @State private var breathe = false
+    @State private var pulse = false
+
+    /// Warm placeholder "photos" inside the stacked polaroids.
+    private let windows: [[Color]] = [
+        [Color(red: 0.55, green: 0.72, blue: 0.95), Color(red: 0.80, green: 0.62, blue: 0.92)],
+        [Color(red: 1.00, green: 0.80, blue: 0.45), Color(red: 0.98, green: 0.52, blue: 0.45)],
+        [Theme.orange, Theme.pink],
+    ]
 
     var body: some View {
         ZStack {
             Theme.sky().ignoresSafeArea()
             SunGlow()
-            VStack(spacing: 22) {
-                // Tiny stack of polaroids gently breathing while we fetch —
-                // the same object the reveal is about to deal out.
+            FloatingMotes()
+
+            VStack(spacing: 26) {
+                // A held stack of polaroids, breathing apart — the hand the
+                // reveal is about to deal.
                 ZStack {
                     ForEach(0..<3, id: \.self) { i in
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(Theme.mat)
-                            .frame(width: 74, height: 88)
-                            .shadow(color: .black.opacity(0.12), radius: 6, y: 4)
-                            .rotationEffect(.degrees(Double(i - 1) * (breathe ? 9 : 4)))
-                            .offset(y: CGFloat(i) * -2)
-                            .animation(
-                                .easeInOut(duration: 1.4).repeatForever(autoreverses: true).delay(Double(i) * 0.1),
-                                value: breathe
-                            )
+                        let t = Double(i - 1)
+                        PolaroidFrame(caption: nil, photoSize: 104) {
+                            LinearGradient(colors: windows[i],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                        }
+                        .rotationEffect(.degrees(t * (breathe ? 10 : 5)), anchor: .bottom)
+                        .offset(x: t * (breathe ? 14 : 7), y: abs(t) * 3)
+                        .animation(
+                            .easeInOut(duration: 1.5).repeatForever(autoreverses: true).delay(Double(i) * 0.08),
+                            value: breathe
+                        )
+                        .zIndex(Double(i))
                     }
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(Theme.brandGradient)
+
                 }
+                .frame(height: 190)
+                .overlay(alignment: .bottom) {
+                    // Clock badge tucked onto the stack's lower-right corner
+                    ZStack {
+                        Circle()
+                            .fill(Theme.mat)
+                            .frame(width: 46, height: 46)
+                            .shadow(color: .black.opacity(0.16), radius: 8, y: 4)
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(Theme.brandGradient)
+                    }
+                    .offset(x: 62, y: -26)
+                }
+
                 Text("GATHERING YOUR MEMORIES")
                     .metaLabel(11, color: Theme.skyInkSoft())
+                    .opacity(pulse ? 1 : 0.45)
+                    .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
             }
         }
-        .onAppear { breathe = true }
+        .onAppear {
+            breathe = true
+            pulse = true
+        }
     }
 }
 

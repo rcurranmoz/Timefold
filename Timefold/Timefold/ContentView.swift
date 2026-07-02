@@ -518,7 +518,6 @@ private struct PermissionView: View {
         ZStack {
             Theme.sky().ignoresSafeArea()
             SunGlow()
-            FloatingMotes()
 
             VStack(spacing: 0) {
                 Spacer()
@@ -645,7 +644,6 @@ private struct BrandedLoadingView: View {
         ZStack {
             Theme.sky().ignoresSafeArea()
             SunGlow()
-            FloatingMotes()
 
             VStack(spacing: 26) {
                 // A held stack of polaroids, breathing apart — the hand the
@@ -2122,29 +2120,25 @@ private enum SpriteMood: Equatable {
     }
 }
 
-/// The five companions the user can choose between. Each shares the same
+/// The three companions the user can choose between. Each shares the same
 /// face/mood machinery but has a distinct silhouette, palette and topper.
 enum MascotKind: String, CaseIterable, Identifiable {
-    case foldy, pip, luna, mochi, ember
+    case foldy, luna, mochi
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
         case .foldy: return "Foldy"
-        case .pip:   return "Pip"
         case .luna:  return "Luna"
         case .mochi: return "Mochi"
-        case .ember: return "Ember"
         }
     }
 
     var blurb: String {
         switch self {
         case .foldy: return "the timekeeper"
-        case .pip:   return "the sprout"
         case .luna:  return "the dreamer"
         case .mochi: return "the kitty"
-        case .ember: return "the spark"
         }
     }
 }
@@ -2225,7 +2219,6 @@ private struct DailyRevealView: View {
         ZStack {
             Theme.sky().ignoresSafeArea()
             SunGlow()
-            FloatingMotes()
 
             VStack(spacing: 0) {
                 // Date + count header
@@ -2389,80 +2382,6 @@ private struct RevealPolaroid: View {
     }
 }
 
-/// Soft dust-mote particles drifting up the reveal — barely-there warmth.
-private struct FloatingMotes: View {
-    private struct Mote: Identifiable {
-        let id: Int
-        let x: CGFloat        // 0...1 across the width
-        let size: CGFloat
-        let duration: Double
-        let delay: Double
-        let opacity: Double
-    }
-
-    private let motes: [Mote] = (0..<9).map { i in
-        var rng = SeededRandom(seed: UInt64(i) &* 0x9E3779B9)
-        return Mote(
-            id: i,
-            x: CGFloat(rng.next(in: 0.05...0.95)),
-            size: CGFloat(rng.next(in: 3...7)),
-            duration: rng.next(in: 9...16),
-            delay: rng.next(in: 0...5),
-            opacity: rng.next(in: 0.12...0.30)
-        )
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            ForEach(motes) { mote in
-                DriftingMote(mote: (mote.size, mote.duration, mote.delay, mote.opacity),
-                             x: mote.x * geo.size.width,
-                             height: geo.size.height)
-            }
-        }
-        .allowsHitTesting(false)
-        .ignoresSafeArea()
-    }
-}
-
-private struct DriftingMote: View {
-    let mote: (size: CGFloat, duration: Double, delay: Double, opacity: Double)
-    let x: CGFloat
-    let height: CGFloat
-    @State private var risen = false
-
-    var body: some View {
-        Circle()
-            .fill(.white)
-            .frame(width: mote.size, height: mote.size)
-            .opacity(risen ? 0 : mote.opacity)
-            .blur(radius: 0.6)
-            .position(x: x, y: risen ? -20 : height + 20)
-            .onAppear {
-                withAnimation(
-                    .linear(duration: mote.duration)
-                    .repeatForever(autoreverses: false)
-                    .delay(mote.delay)
-                ) {
-                    risen = true
-                }
-            }
-    }
-}
-
-/// Tiny deterministic RNG so decorative layouts are stable between renders.
-private struct SeededRandom {
-    private var state: UInt64
-    init(seed: UInt64) { state = seed &+ 0x9E3779B97F4A7C15 }
-    mutating func next() -> Double {
-        state ^= state << 13; state ^= state >> 7; state ^= state << 17
-        return Double(state % 10_000) / 10_000
-    }
-    mutating func next(in range: ClosedRange<Double>) -> Double {
-        range.lowerBound + next() * (range.upperBound - range.lowerBound)
-    }
-}
-
 // MARK: - The sprite
 
 private struct TimeSprite: View {
@@ -2495,10 +2414,8 @@ private struct TimeSprite: View {
         let c: [Color]
         switch kind {
         case .foldy: c = [Theme.orange, Theme.pink]
-        case .pip:   c = [Color(red: 1.00, green: 0.86, blue: 0.42), Color(red: 1.00, green: 0.70, blue: 0.40)]
         case .luna:  c = [Color(red: 0.74, green: 0.72, blue: 0.97), Color(red: 0.55, green: 0.53, blue: 0.86)]
         case .mochi: c = [Color(red: 0.62, green: 0.92, blue: 0.82), Color(red: 0.34, green: 0.78, blue: 0.74)]
-        case .ember: c = [Color(red: 1.00, green: 0.62, blue: 0.42), Color(red: 0.95, green: 0.30, blue: 0.34)]
         }
         return LinearGradient(colors: c, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
@@ -2506,10 +2423,8 @@ private struct TimeSprite: View {
     private var accent: Color {
         switch kind {
         case .foldy: return Theme.pink
-        case .pip:   return Color(red: 1.00, green: 0.55, blue: 0.45)
         case .luna:  return Color(red: 0.60, green: 0.55, blue: 0.95)
         case .mochi: return Color(red: 0.95, green: 0.55, blue: 0.60)
-        case .ember: return Color(red: 0.98, green: 0.40, blue: 0.42)
         }
     }
 
@@ -2518,23 +2433,17 @@ private struct TimeSprite: View {
         switch kind {
         case .foldy, .luna:
             Circle().fill(gradient).frame(width: bodySize, height: bodySize)
-        case .pip:
-            Ellipse().fill(gradient).frame(width: bodySize * 0.84, height: bodySize) // egg
         case .mochi:
             RoundedRectangle(cornerRadius: bodySize * 0.40, style: .continuous)
                 .fill(gradient).frame(width: bodySize, height: bodySize * 0.94)        // squishy
-        case .ember:
-            Capsule().fill(gradient).frame(width: bodySize * 0.80, height: bodySize)   // bean
         }
     }
 
     @ViewBuilder private var topper: some View {
         switch kind {
         case .foldy: clockTopknot
-        case .pip:   sproutTopper
         case .luna:  starTopper
         case .mochi: EmptyView()      // mochi wears ears instead
-        case .ember: flameTopper
         }
     }
 
@@ -2604,11 +2513,11 @@ private struct TimeSprite: View {
                     .offset(x: bodySize * 0.5, y: 4)
                     .shadow(color: accent.opacity(0.3), radius: 6, y: 3)
             }
-            .scaleEffect(x: 1 + bob * 0.01, y: 1 - bob * 0.012, anchor: .bottom)
-            .offset(y: bob)
+            // A quiet breathing squash — alive, but firmly on the ground.
+            .scaleEffect(x: 1 + bob * 0.006, y: 1 - bob * 0.008, anchor: .bottom)
         }
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) { bob = -10 }
+            withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) { bob = -4 }
             twinkle = true
         }
         .task { await animateLoop() }
@@ -2660,19 +2569,6 @@ private struct TimeSprite: View {
         }
     }
 
-    // Pip — a sprouting leaf.
-    private var sproutTopper: some View {
-        VStack(spacing: -1) {
-            ZStack {
-                Ellipse().fill(Color(red: 0.42, green: 0.76, blue: 0.46))
-                    .frame(width: 15, height: 9).rotationEffect(.degrees(-38)).offset(x: -5)
-                Ellipse().fill(Color(red: 0.48, green: 0.80, blue: 0.50))
-                    .frame(width: 15, height: 9).rotationEffect(.degrees(38)).offset(x: 5)
-            }
-            Capsule().fill(Color(red: 0.45, green: 0.70, blue: 0.42)).frame(width: 3, height: 11)
-        }
-    }
-
     // Luna — a star on a wand.
     private var starTopper: some View {
         VStack(spacing: 0) {
@@ -2682,14 +2578,6 @@ private struct TimeSprite: View {
                 .shadow(color: .white.opacity(0.8), radius: 4)
             Capsule().fill(Color.white.opacity(0.85)).frame(width: 3, height: 9)
         }
-    }
-
-    // Ember — a flame tuft.
-    private var flameTopper: some View {
-        Image(systemName: "flame.fill")
-            .font(.system(size: 22))
-            .foregroundStyle(LinearGradient(colors: [Theme.orange, Theme.pink],
-                                            startPoint: .bottom, endPoint: .top))
     }
 
     private func animateLoop() async {

@@ -346,6 +346,7 @@ struct ContentView: View {
             .toolbarBackground(hasContent ? .visible : .hidden, for: .navigationBar)
         }
         .task {
+            VisitTracker.recordVisit()
             model.start()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -510,6 +511,7 @@ private struct PermissionView: View {
     let onRequest: () -> Void
     @State private var appeared = false
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+    @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
 
     private var ink: Color { Theme.skyInk() }
     private var inkSoft: Color { Theme.skyInkSoft() }
@@ -523,7 +525,8 @@ private struct PermissionView: View {
                 Spacer()
 
                 // Your companion says hello before asking for anything.
-                TimeSprite(mood: .happy, kind: MascotKind(rawValue: mascotRaw) ?? .foldy)
+                TimeSprite(mood: .happy, kind: MascotKind(rawValue: mascotRaw) ?? .foldy,
+                           hat: HatKind(rawValue: hatRaw) ?? .none)
                     .scaleEffect(0.85, anchor: .bottom)
                     .frame(height: 190)
                     .opacity(appeared ? 1 : 0)
@@ -697,6 +700,7 @@ private struct EmptyMemoriesView: View {
     let date: Date
     @State private var appeared = false
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+    @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
 
     private var dateString: String {
         let f = DateFormatter(); f.dateFormat = "MMMM d"; return f.string(from: date)
@@ -707,7 +711,8 @@ private struct EmptyMemoriesView: View {
             Theme.sky(for: Date()).ignoresSafeArea()
             SunGlow()
             VStack(spacing: 10) {
-                TimeSprite(mood: .sleepy, kind: MascotKind(rawValue: mascotRaw) ?? .foldy)
+                TimeSprite(mood: .sleepy, kind: MascotKind(rawValue: mascotRaw) ?? .foldy,
+                           hat: HatKind(rawValue: hatRaw) ?? .none)
                     .scaleEffect(0.62)
                     .frame(height: 150)
                 Text(dateString)
@@ -742,6 +747,26 @@ private struct MemoriesGridView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
 
     @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
+    @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+    @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
+
+    // Hidden-pictures easter egg: once a day the companion tucks itself
+    // into one photo in the grid. Deterministic per day, so it stays put
+    // while you hunt for it.
+    private var daySeed: Int {
+        Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
+    }
+    private var hiddenIndex: Int? {
+        guard assets.count > 1 else { return nil }
+        #if DEBUG
+        // Testing hook: force the hiding spot with TIMEFOLD_EGG_INDEX.
+        if let forced = ProcessInfo.processInfo.environment["TIMEFOLD_EGG_INDEX"],
+           let i = Int(forced) {
+            return i % assets.count
+        }
+        #endif
+        return (daySeed &* 7919) % assets.count
+    }
 
     @Namespace private var heroNS
     @State private var entered = false
@@ -820,6 +845,15 @@ private struct MemoriesGridView: View {
                                     .delay(min(Double(index) * 0.025, 0.45)),
                                 value: entered
                             )
+                            .overlay {
+                                if index == hiddenIndex {
+                                    HiddenCompanion(
+                                        corner: daySeed % 4,
+                                        kind: MascotKind(rawValue: mascotRaw) ?? .foldy,
+                                        hat: HatKind(rawValue: hatRaw) ?? .none
+                                    )
+                                }
+                            }
                             .background(
                                 GeometryReader { itemGeo in
                                     Color.clear
@@ -909,6 +943,28 @@ private struct MemoriesGridView: View {
                 }
             }
         }
+    }
+}
+
+/// The daily hidden companion — small enough to miss at a glance,
+/// waving from a corner of one photo. Highlights-magazine energy.
+private struct HiddenCompanion: View {
+    let corner: Int
+    let kind: MascotKind
+    let hat: HatKind
+
+    private static let corners: [Alignment] = [.bottomTrailing, .bottomLeading, .topTrailing, .topLeading]
+
+    var body: some View {
+        ZStack(alignment: Self.corners[corner % 4]) {
+            Color.clear
+            TimeSprite(mood: .happy, kind: kind, hat: hat)
+                .scaleEffect(0.13)
+                .frame(width: 26, height: 30)
+                .padding(2)
+        }
+        .clipped()
+        .allowsHitTesting(false)
     }
 }
 
@@ -1983,6 +2039,16 @@ struct SettingsView: View {
     @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
     @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+    @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
+
+    private var wardrobeFooter: String {
+        let day = VisitTracker.dayCount
+        let days = day == 1 ? "1 day" : "\(day) days"
+        if let next = HatKind.allCases.filter({ !$0.isUnlocked }).min(by: { $0.unlockDay < $1.unlockDay }) {
+            return "You've opened Timefold on \(days). Next hat unlocks on day \(next.unlockDay)."
+        }
+        return "You've opened Timefold on \(days) — every hat is yours."
+    }
 
     var body: some View {
         NavigationStack {
@@ -1996,6 +2062,19 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity)
                 } footer: {
                     Text("Pick the little friend who greets you each day.")
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
+                }
+
+                Section {
+                    HatPicker(selectedRaw: $hatRaw)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                } header: {
+                    Text("Wardrobe")
+                        .frame(maxWidth: .infinity)
+                } footer: {
+                    Text(wardrobeFooter)
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)
                 }
@@ -2069,6 +2148,7 @@ struct SettingsView: View {
 
 private struct MascotPicker: View {
     @Binding var selectedRaw: String
+    @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
 
     var body: some View {
         // Three companions fit on every screen — no scroll, just centered.
@@ -2076,7 +2156,7 @@ private struct MascotPicker: View {
             ForEach(MascotKind.allCases) { kind in
                     let isSelected = kind.rawValue == selectedRaw
                     VStack(spacing: 4) {
-                        TimeSprite(mood: .happy, kind: kind)
+                        TimeSprite(mood: .happy, kind: kind, hat: HatKind(rawValue: hatRaw) ?? .none)
                             .scaleEffect(0.42)
                             .frame(width: 80, height: 90)
                         Text(kind.displayName)
@@ -2109,6 +2189,74 @@ private struct MascotPicker: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Hat picker (Settings)
+
+private struct HatPicker: View {
+    @Binding var selectedRaw: String
+    @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(HatKind.allCases) { hat in
+                    let unlocked = hat.isUnlocked
+                    let isSelected = hat.rawValue == selectedRaw
+                    VStack(spacing: 6) {
+                        ZStack {
+                            if hat == .none {
+                                Image(systemName: "circle.slash")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                HatGlyph(kind: hat)
+                                    .grayscale(unlocked ? 0 : 1)
+                                    .opacity(unlocked ? 1 : 0.35)
+                            }
+                        }
+                        .frame(width: 52, height: 42)
+
+                        Text(hat.displayName)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(unlocked && isSelected ? Color.primary : .secondary)
+
+                        if unlocked {
+                            Text(" ")
+                                .font(.system(size: 9, weight: .semibold))
+                        } else {
+                            Label("Day \(hat.unlockDay)", systemImage: "lock.fill")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 10)
+                    .frame(width: 78)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(isSelected ? Theme.pink.opacity(0.12) : Color(uiColor: .secondarySystemGroupedBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(isSelected ? Theme.pink : Color.clear, lineWidth: 2)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .onTapGesture {
+                        guard unlocked else {
+                            Haptics.tap(.light)
+                            return
+                        }
+                        Haptics.tap(.light)
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            selectedRaw = hat.rawValue
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+        }
     }
 }
 
@@ -2147,6 +2295,178 @@ enum MascotKind: String, CaseIterable, Identifiable {
 }
 
 private let mascotStorageKey = "selectedMascot"
+private let hatStorageKey = "selectedHat"
+
+// MARK: - Wardrobe
+
+/// Hats unlock as the app is opened on more distinct days (non-consecutive).
+/// Not money — time. The currency of a memories app.
+enum HatKind: String, CaseIterable, Identifiable {
+    case none, party, propeller, cowboy, crown, wizard
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none:      return "None"
+        case .party:     return "Party"
+        case .propeller: return "Propeller"
+        case .cowboy:    return "Cowboy"
+        case .crown:     return "Crown"
+        case .wizard:    return "Wizard"
+        }
+    }
+
+    /// The visit-day count at which this hat unlocks.
+    var unlockDay: Int {
+        switch self {
+        case .none, .party: return 1
+        case .propeller:    return 3
+        case .cowboy:       return 7
+        case .crown:        return 14
+        case .wizard:       return 30
+        }
+    }
+
+    var isUnlocked: Bool { VisitTracker.dayCount >= unlockDay }
+}
+
+/// Counts distinct days the app has been opened; consecutive not required.
+enum VisitTracker {
+    private static let dayCountKey = "visitDayCount"
+    private static let lastVisitKey = "lastVisitDay"
+    private static let celebrateKey = "hatCelebrationDay"
+
+    /// Call once per launch/foreground. Increments the day count on the
+    /// first open of a calendar day; auto-wears and flags any newly
+    /// unlocked hat so the reveal can celebrate it.
+    @discardableResult
+    static func recordVisit(now: Date = Date()) -> Int {
+        let ud = UserDefaults.standard
+        let today = Calendar.current.startOfDay(for: now)
+        let count = ud.integer(forKey: dayCountKey)
+        if let last = ud.object(forKey: lastVisitKey) as? Date,
+           Calendar.current.isDate(last, inSameDayAs: today) {
+            return count
+        }
+        let newCount = count + 1
+        ud.set(today, forKey: lastVisitKey)
+        ud.set(newCount, forKey: dayCountKey)
+        if let newHat = HatKind.allCases.first(where: { $0 != .none && $0.unlockDay == newCount }) {
+            ud.set(today, forKey: celebrateKey)
+            ud.set(newHat.rawValue, forKey: hatStorageKey)
+        }
+        return newCount
+    }
+
+    static var dayCount: Int {
+        max(UserDefaults.standard.integer(forKey: dayCountKey), 1)
+    }
+
+    /// True only on the day a hat was unlocked — powers the reveal bubble.
+    static var celebrationIsToday: Bool {
+        guard let d = UserDefaults.standard.object(forKey: celebrateKey) as? Date else { return false }
+        return Calendar.current.isDateInToday(d)
+    }
+}
+
+// MARK: - Hat drawings
+
+private struct Dome: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.maxY),
+                       control: CGPoint(x: rect.midX, y: rect.minY - rect.height * 0.6))
+        p.closeSubpath()
+        return p
+    }
+}
+
+private struct CrownShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: h))
+        p.addLine(to: CGPoint(x: 0, y: h * 0.35))
+        p.addLine(to: CGPoint(x: w * 0.25, y: h * 0.60))
+        p.addLine(to: CGPoint(x: w * 0.50, y: 0))
+        p.addLine(to: CGPoint(x: w * 0.75, y: h * 0.60))
+        p.addLine(to: CGPoint(x: w, y: h * 0.35))
+        p.addLine(to: CGPoint(x: w, y: h))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// A hat, drawn alone — worn by TimeSprite and previewed in the picker.
+struct HatGlyph: View {
+    let kind: HatKind
+
+    var body: some View {
+        switch kind {
+        case .none:
+            EmptyView()
+
+        case .party:
+            VStack(spacing: -3) {
+                Circle().fill(Theme.cream).frame(width: 11, height: 11)
+                Triangle()
+                    .fill(LinearGradient(colors: [Theme.orange, Theme.pink],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 32, height: 30)
+            }
+            .rotationEffect(.degrees(10))
+
+        case .propeller:
+            VStack(spacing: -1) {
+                ZStack {
+                    Capsule().fill(Color(red: 0.55, green: 0.75, blue: 0.95)).frame(width: 34, height: 7)
+                    Circle().fill(Color(red: 0.95, green: 0.65, blue: 0.35)).frame(width: 8, height: 8)
+                }
+                Capsule().fill(Color(red: 0.30, green: 0.25, blue: 0.28)).frame(width: 3, height: 5)
+                Dome()
+                    .fill(LinearGradient(colors: [Color(red: 0.95, green: 0.45, blue: 0.40),
+                                                  Color(red: 0.82, green: 0.28, blue: 0.30)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 34, height: 16)
+            }
+
+        case .cowboy:
+            ZStack {
+                Ellipse().fill(Color(red: 0.60, green: 0.43, blue: 0.28)).frame(width: 48, height: 13)
+                Dome().fill(Color(red: 0.52, green: 0.36, blue: 0.23))
+                    .frame(width: 25, height: 17)
+                    .offset(y: -11)
+            }
+            .rotationEffect(.degrees(-6))
+            .padding(.top, 10)
+
+        case .crown:
+            CrownShape()
+                .fill(LinearGradient(colors: [Color(red: 0.98, green: 0.83, blue: 0.35),
+                                              Color(red: 0.90, green: 0.68, blue: 0.22)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: 32, height: 20)
+
+        case .wizard:
+            VStack(spacing: -3) {
+                Triangle()
+                    .fill(LinearGradient(colors: [Color(red: 0.62, green: 0.52, blue: 0.95),
+                                                  Color(red: 0.45, green: 0.35, blue: 0.80)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 28, height: 30)
+                    .overlay {
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 8))
+                            .foregroundStyle(Theme.cream)
+                            .offset(y: 4)
+                    }
+                Ellipse().fill(Color(red: 0.45, green: 0.35, blue: 0.80)).frame(width: 40, height: 9)
+            }
+            .rotationEffect(.degrees(7))
+        }
+    }
+}
 
 private struct DailyRevealView: View {
     let assets: [PHAsset]
@@ -2164,7 +2484,9 @@ private struct DailyRevealView: View {
     @State private var isDismissing = false
 
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+    @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
     private var kind: MascotKind { MascotKind(rawValue: mascotRaw) ?? .foldy }
+    private var hat: HatKind { HatKind(rawValue: hatRaw) ?? .none }
 
     private var count: Int { assets.count }
     private var mood: SpriteMood { SpriteMood.forCount(count) }
@@ -2192,6 +2514,7 @@ private struct DailyRevealView: View {
 
     /// A tiny bit of companion personality, stable for the whole day.
     private var bubbleText: String {
+        if VisitTracker.celebrationIsToday { return "ooh — a new hat!!" }
         let lines: [String]
         switch Theme.daypart() {
         case .sunrise: lines = ["good morning!", "rise and shine!", "morning, you!"]
@@ -2281,7 +2604,7 @@ private struct DailyRevealView: View {
 
                 // The companion, peeking up from the bottom to greet you
                 ZStack(alignment: .top) {
-                    TimeSprite(mood: mood, kind: kind)
+                    TimeSprite(mood: mood, kind: kind, hat: hat)
                         .scaleEffect(0.72, anchor: .bottom)
                         .offset(y: spriteUp && !flungAway ? 0 : 190)
                         .animation(.spring(response: 0.5, dampingFraction: 0.62), value: spriteUp)
@@ -2390,6 +2713,7 @@ private struct RevealPolaroid: View {
 private struct TimeSprite: View {
     let mood: SpriteMood
     var kind: MascotKind = .foldy
+    var hat: HatKind = .none
 
     @State private var eyeOpen: CGFloat = 1
     @State private var bob: CGFloat = 0
@@ -2474,8 +2798,15 @@ private struct TimeSprite: View {
 
             // The character
             ZStack {
-                topper
-                    .offset(y: -bodySize * 0.54)
+                // A hat replaces the natural topper (mochi keeps its ears).
+                Group {
+                    if hat == .none {
+                        topper
+                    } else {
+                        HatGlyph(kind: hat).scaleEffect(1.2)
+                    }
+                }
+                .offset(y: -bodySize * 0.54)
 
                 // Cat ears for mochi (behind the body so they tuck in)
                 if kind == .mochi {

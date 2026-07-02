@@ -244,106 +244,13 @@ struct ContentView: View {
             .blur(radius: showingReveal ? 14 : 0)
             .animation(.easeInOut(duration: 0.55), value: showingReveal)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // Gate at the ToolbarItem level: on branded full-screen
-                // states even an *empty* item renders its glass container.
-                if hasContent {
-                ToolbarItem(placement: .principal) {
-                        VStack(spacing: isCompact ? 0.5 : 1) {
-                            BrandWordmark(isCompact: isCompact)
-                            HStack(spacing: isCompact ? 2 : 3) {
-                                Text(formatDateString(selectedDate))
-                                    .font(.system(size: isCompact ? 9 : 11, weight: .medium))
-                                    .foregroundStyle(.secondary)
-
-                                if !Calendar.current.isDateInToday(selectedDate) {
-                                    Button {
-                                        selectedDate = Date()
-                                        model.loadMemoriesFor(date: Date())
-                                    } label: {
-                                        Text("• Today")
-                                            .font(.system(size: isCompact ? 9 : 11, weight: .medium))
-                                            .foregroundStyle(.blue)
-                                    }
-                                }
-                            }
-                        }
-                        .fixedSize()
-                        .transition(.scale.combined(with: .opacity))
-                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: model.state)
-                }
-
-                ToolbarItem(placement: .topBarLeading) {
-                    // Fixed frame container
-                    HStack {
-                        Button {
-                            showingSettings = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                        }
-                    }
-                    .frame(width: 44, height: 44)
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        // Calendar button (only in grid mode)
-                        if viewMode == .grid {
-                            Button {
-                                showingDatePicker = true
-                            } label: {
-                                Image(systemName: "calendar")
-                            }
-                        }
-
-                        // View mode toggle & select/delete only make sense
-                        // once memories are actually loaded
-                        if case .loaded = model.state {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    // Clear selection when switching to fullscreen
-                                    if viewMode == .grid {
-                                        isSelecting = false
-                                        selectedAssets.removeAll()
-                                    }
-                                    viewMode = viewMode == .grid ? .fullscreen : .grid
-                                }
-                            } label: {
-                                Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
-                            }
-
-                            // Select/Delete buttons (only in grid mode)
-                            if viewMode == .grid {
-                                if isSelecting {
-                                    Button("Cancel") {
-                                        withAnimation {
-                                            isSelecting = false
-                                            selectedAssets.removeAll()
-                                        }
-                                    }
-
-                                    Button(role: .destructive) {
-                                        showingDeleteConfirmation = true
-                                    } label: {
-                                        Text("Delete")
-                                    }
-                                    .disabled(selectedAssets.isEmpty)
-                                } else {
-                                    Button {
-                                        withAnimation {
-                                            isSelecting = true
-                                        }
-                                    } label: {
-                                        Image(systemName: "checkmark.circle")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                } // if hasContent
+            // The system toolbar refuses to center a principal item inside
+            // an asymmetric gap, so the main screen draws its own floating
+            // header: gear | wordmark (centered in the gap) | actions.
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                floatingHeader
             }
-            .toolbarBackground(hasContent ? .visible : .hidden, for: .navigationBar)
         }
         .task {
             VisitTracker.recordVisit()
@@ -411,6 +318,122 @@ struct ContentView: View {
                 .ignoresSafeArea()
                 .transition(.opacity)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var floatingHeader: some View {
+        if hasContent {
+            HStack(spacing: 12) {
+                Button {
+                    showingSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
+
+                // Wordmark + date, centered in whatever gap the two
+                // button clusters leave over.
+                VStack(spacing: isCompact ? 0.5 : 1) {
+                    BrandWordmark(isCompact: isCompact)
+                    HStack(spacing: isCompact ? 2 : 3) {
+                        Text(formatDateString(selectedDate))
+                            .font(.system(size: isCompact ? 9 : 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+
+                        if !Calendar.current.isDateInToday(selectedDate) {
+                            Button {
+                                selectedDate = Date()
+                                model.loadMemoriesFor(date: Date())
+                            } label: {
+                                Text("• Today")
+                                    .font(.system(size: isCompact ? 9 : 11, weight: .medium))
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                    }
+                }
+                .fixedSize()
+                .frame(maxWidth: .infinity)
+                .transition(.scale.combined(with: .opacity))
+                .animation(.spring(response: 0.4, dampingFraction: 0.7), value: model.state)
+
+                HStack(spacing: 0) {
+                    if viewMode == .grid, !isSelecting {
+                        Button {
+                            showingDatePicker = true
+                        } label: {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if case .loaded = model.state {
+                        if !isSelecting {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    if viewMode == .grid {
+                                        selectedAssets.removeAll()
+                                    }
+                                    viewMode = viewMode == .grid ? .fullscreen : .grid
+                                }
+                            } label: {
+                                Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
+                                    .font(.system(size: 17, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if viewMode == .grid {
+                            if isSelecting {
+                                Button("Cancel") {
+                                    withAnimation {
+                                        isSelecting = false
+                                        selectedAssets.removeAll()
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .frame(height: 44)
+
+                                Button {
+                                    showingDeleteConfirmation = true
+                                } label: {
+                                    Text("Delete")
+                                        .foregroundStyle(selectedAssets.isEmpty ? Color.secondary : .red)
+                                }
+                                .disabled(selectedAssets.isEmpty)
+                                .padding(.horizontal, 12)
+                                .frame(height: 44)
+                            } else {
+                                Button {
+                                    withAnimation {
+                                        isSelecting = true
+                                    }
+                                } label: {
+                                    Image(systemName: "checkmark.circle")
+                                        .font(.system(size: 17, weight: .medium))
+                                        .foregroundStyle(.primary)
+                                        .frame(width: 44, height: 44)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .glassEffect(.regular.interactive(), in: Capsule())
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 2)
+            .padding(.bottom, 6)
         }
     }
 
@@ -2977,7 +3000,8 @@ private struct SpeechBubbleView: View {
             .font(.system(size: 17, weight: .bold, design: .rounded))
             .foregroundStyle(Color(red: 0.30, green: 0.20, blue: 0.24))
             .padding(.horizontal, 18)
-            .padding(.vertical, 11)
+            .padding(.top, 11)
+            .padding(.bottom, 11 + 8) // extra 8pt = the tail zone below the bubble body
             .background(
                 BubbleShape()
                     .fill(.white)

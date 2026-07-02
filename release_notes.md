@@ -1,6 +1,12 @@
 # App Store Release Notes
 
-## Current build (pending App Review)
+## v1.7 (build 46) — TestFlight
+
+Timefold got a warm makeover. Your daily memories now arrive like a hand of polaroids dealt across the table, with your companion there to greet you. The whole app follows the time of day — sunrise colors in the morning, cozy plum at night. Same photos, same privacy, way more heart.
+
+---
+
+## v1.6.2 (build 45, pending App Review)
 
 Bug fix: the "years ago today" label on the shared frame was sometimes off by a year, depending on the time of day. Now it matches what you see in the app.
 

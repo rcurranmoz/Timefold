@@ -2068,9 +2068,9 @@ private struct MascotPicker: View {
     @Binding var selectedRaw: String
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(MascotKind.allCases) { kind in
+        // Three companions fit on every screen — no scroll, just centered.
+        HStack(spacing: 12) {
+            ForEach(MascotKind.allCases) { kind in
                     let isSelected = kind.rawValue == selectedRaw
                     VStack(spacing: 4) {
                         TimeSprite(mood: .happy, kind: kind)
@@ -2101,11 +2101,11 @@ private struct MascotPicker: View {
                             selectedRaw = kind.rawValue
                         }
                     }
-                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
     }
 }
 

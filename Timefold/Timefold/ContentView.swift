@@ -1993,8 +1993,11 @@ struct SettingsView: View {
                         .listRowBackground(Color.clear)
                 } header: {
                     Text("Companion")
+                        .frame(maxWidth: .infinity)
                 } footer: {
                     Text("Pick the little friend who greets you each day.")
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
                 }
 
                 Section {

@@ -6,6 +6,162 @@ import UserNotifications
 import WidgetKit
 import AVKit
 
+// MARK: - Theme
+// Single source of truth for Timefold's visual identity: warm, tactile,
+// scrapbook-y. Every branded surface (reveal, loading, empty, permission)
+// shares one "sky" that follows the time of day, so opening the app at dawn
+// feels different from opening it at midnight — but always cozy.
+enum Theme {
+    // Brand palette
+    static let pink   = Color(red: 1.00, green: 0.18, blue: 0.33)
+    static let orange = Color(red: 1.00, green: 0.58, blue: 0.00)
+    static let cream  = Color(red: 0.99, green: 0.96, blue: 0.90)
+    static let mat    = Color(red: 1.00, green: 0.99, blue: 0.96) // polaroid card stock
+    static let ink    = Color(red: 0.27, green: 0.17, blue: 0.19) // warm near-black
+    static let inkSoft = Color(red: 0.48, green: 0.35, blue: 0.37)
+
+    static let brandGradient = LinearGradient(
+        colors: [orange, pink],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    enum Daypart { case sunrise, day, dusk, night }
+
+    static func daypart(for date: Date = Date()) -> Daypart {
+        switch Calendar.current.component(.hour, from: date) {
+        case 5..<11:  return .sunrise
+        case 11..<17: return .day
+        case 17..<21: return .dusk
+        default:      return .night
+        }
+    }
+
+    /// Warm backdrop that follows the time of day. Night is a cozy plum, not
+    /// a void — the app should feel like a lit room, never a server rack.
+    static func sky(for date: Date = Date()) -> LinearGradient {
+        let colors: [Color]
+        switch daypart(for: date) {
+        case .sunrise:
+            colors = [Color(red: 1.00, green: 0.95, blue: 0.86),
+                      Color(red: 1.00, green: 0.87, blue: 0.80),
+                      Color(red: 0.98, green: 0.80, blue: 0.82)]
+        case .day:
+            colors = [Color(red: 1.00, green: 0.97, blue: 0.88),
+                      Color(red: 1.00, green: 0.91, blue: 0.79),
+                      Color(red: 0.99, green: 0.84, blue: 0.78)]
+        case .dusk:
+            colors = [Color(red: 0.99, green: 0.87, blue: 0.76),
+                      Color(red: 0.98, green: 0.75, blue: 0.72),
+                      Color(red: 0.87, green: 0.68, blue: 0.82)]
+        case .night:
+            colors = [Color(red: 0.20, green: 0.13, blue: 0.26),
+                      Color(red: 0.28, green: 0.15, blue: 0.28),
+                      Color(red: 0.36, green: 0.21, blue: 0.30)]
+        }
+        return LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
+    }
+
+    static func isNightSky(for date: Date = Date()) -> Bool {
+        daypart(for: date) == .night
+    }
+
+    /// Primary / secondary text colors that read on the current sky.
+    static func skyInk(for date: Date = Date()) -> Color {
+        isNightSky(for: date) ? cream : ink
+    }
+    static func skyInkSoft(for date: Date = Date()) -> Color {
+        isNightSky(for: date) ? cream.opacity(0.72) : inkSoft
+    }
+}
+
+extension Font {
+    /// Serif face for dates & headlines — the "memory" voice.
+    static func timefoldSerif(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
+        .system(size: size, weight: weight, design: .serif)
+    }
+    /// Rounded face for meta labels, hints, and companion dialogue.
+    static func timefoldRounded(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight, design: .rounded)
+    }
+}
+
+extension Text {
+    /// Kerned, small-caps-feeling meta label in the brand voice.
+    func metaLabel(_ size: CGFloat = 12, color: Color = Theme.inkSoft) -> some View {
+        self.font(.timefoldRounded(size))
+            .kerning(2.4)
+            .foregroundStyle(color)
+    }
+}
+
+/// Lightweight haptics helper for the reveal beats & interactions.
+enum Haptics {
+    static func tap(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+}
+
+/// Animated skeleton placeholder shown while a thumbnail loads.
+struct ShimmerView: View {
+    @State private var phase: CGFloat = -1
+    var body: some View {
+        Rectangle()
+            .fill(Color(uiColor: .secondarySystemFill))
+            .overlay {
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    LinearGradient(
+                        colors: [.clear, Color.white.opacity(0.35), .clear],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(width: w * 0.6)
+                    .offset(x: phase * w * 1.6)
+                }
+            }
+            .clipped()
+            .onAppear {
+                withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                    phase = 1
+                }
+            }
+    }
+}
+
+// MARK: - Hero zoom transition (iOS 18+, graceful no-op on iOS 17)
+private struct HeroSource: ViewModifier {
+    let id: String
+    let ns: Namespace.ID
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.matchedTransitionSource(id: id, in: ns)
+        } else {
+            content
+        }
+    }
+}
+
+private struct HeroDestination: ViewModifier {
+    let id: String
+    let ns: Namespace.ID
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.navigationTransition(.zoom(sourceID: id, in: ns))
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    func heroSource(_ id: String, _ ns: Namespace.ID) -> some View {
+        modifier(HeroSource(id: id, ns: ns))
+    }
+    func heroDestination(_ id: String, _ ns: Namespace.ID) -> some View {
+        modifier(HeroDestination(id: id, ns: ns))
+    }
+}
+
 struct ContentView: View {
     @StateObject private var model = MemoriesViewModel()
     @StateObject private var notificationManager = NotificationManager()
@@ -37,20 +193,16 @@ struct ContentView: View {
                     }
 
                 case .loading:
-                    ProgressView("Loading memories…")
-                        .padding()
+                    BrandedLoadingView()
 
                 case .empty:
-                    ContentUnavailableView(
-                        "No memories found",
-                        systemImage: "photo.on.rectangle.angled",
-                        description: Text("No photos found for today in past years.\nCheck back tomorrow!")
-                    )
+                    EmptyMemoriesView(date: selectedDate)
 
                 case .loaded(let assets):
                     if viewMode == .grid {
                         MemoriesGridView(
                             assets: assets,
+                            isRevealActive: showingReveal,
                             isGridViewMode: $viewMode,
                             isSelecting: $isSelecting,
                             selectedAssets: $selectedAssets,
@@ -76,30 +228,17 @@ struct ContentView: View {
                     )
                 }
             }
+            // While the daily reveal is up, the app waits out of focus behind
+            // it; when the reveal lifts, everything settles sharp. One scene,
+            // not two screens.
+            .scaleEffect(showingReveal ? 1.06 : 1)
+            .blur(radius: showingReveal ? 14 : 0)
+            .animation(.easeInOut(duration: 0.55), value: showingReveal)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: isCompact ? 0.5 : 1) {
-                        HStack(spacing: isCompact ? 2 : 3) {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: isCompact ? 13 : 16, weight: .semibold))
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        colors: [.orange, .pink],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                            Text("Timefold")
-                                .font(.system(size: isCompact ? 16 : 20, weight: .bold, design: .rounded))
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        colors: [.orange, .pink],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                        }
+                        BrandWordmark(isCompact: isCompact)
                         HStack(spacing: isCompact ? 2 : 3) {
                             Text(formatDateString(selectedDate))
                                 .font(.system(size: isCompact ? 9 : 11, weight: .medium))
@@ -234,7 +373,7 @@ struct ContentView: View {
             if showingReveal, case .loaded(let assets) = model.state {
                 DailyRevealView(assets: assets, date: selectedDate) {
                     markRevealShown()
-                    withAnimation(.easeInOut(duration: 0.6)) {
+                    withAnimation(.easeInOut(duration: 0.55)) {
                         showingReveal = false
                     }
                 }
@@ -288,74 +427,257 @@ struct ContentView: View {
     }
 }
 
-private struct PermissionView: View {
-    let onRequest: () -> Void
+// MARK: - Brand Wordmark (animated)
+private struct BrandWordmark: View {
+    let isCompact: Bool
+    @State private var shimmer = false
+
+    private var glyphs: some View {
+        HStack(spacing: isCompact ? 2 : 3) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: isCompact ? 13 : 16, weight: .semibold))
+            Text("Timefold")
+                .font(.system(size: isCompact ? 16 : 20, weight: .bold, design: .rounded))
+        }
+        .fixedSize()
+    }
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            
-            VStack(spacing: 20) {
-                Image(systemName: "photo.stack")
-                    .font(.system(size: 60))
-                    .foregroundStyle(.blue.gradient)
-                    .symbolEffect(.pulse)
-                
-                VStack(spacing: 8) {
-                    Text("Your Memories Await")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    
-                    Text("Timefold shows you photos from this day in past years.")
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
+        glyphs
+            .foregroundStyle(Theme.brandGradient)
+            .overlay {
+                GeometryReader { geo in
+                    let w = max(geo.size.width, 1)
+                    LinearGradient(
+                        colors: [.clear, .white.opacity(0.85), .clear],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(width: w * 0.45)
+                    .offset(x: shimmer ? w * 1.1 : -w * 0.55)
+                    .blendMode(.plusLighter)
+                }
+                .mask(glyphs)
+                .allowsHitTesting(false)
+            }
+            .onAppear {
+                withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: false).delay(1.0)) {
+                    shimmer = true
                 }
             }
-            .padding(.horizontal)
-            
-            Spacer()
-            
-            VStack(spacing: 16) {
-                Button {
-                    onRequest()
-                } label: {
-                    Text("Continue")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(.blue.gradient)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-                
-                VStack(spacing: 4) {
-                    Label("100% Private", systemImage: "lock.shield.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("No accounts • No ads • Nothing leaves your device")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+    }
+}
+
+private struct PermissionView: View {
+    let onRequest: () -> Void
+    @State private var appeared = false
+    @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+
+    private var ink: Color { Theme.skyInk() }
+    private var inkSoft: Color { Theme.skyInkSoft() }
+
+    var body: some View {
+        ZStack {
+            Theme.sky().ignoresSafeArea()
+            SunGlow()
+            FloatingMotes()
+
+            VStack(spacing: 0) {
+                Spacer()
+
+                // Your companion says hello before asking for anything.
+                TimeSprite(mood: .happy, kind: MascotKind(rawValue: mascotRaw) ?? .foldy)
+                    .scaleEffect(0.85, anchor: .bottom)
+                    .frame(height: 190)
+                    .opacity(appeared ? 1 : 0)
+                    .scaleEffect(appeared ? 1 : 0.7, anchor: .bottom)
+                    .animation(.spring(response: 0.55, dampingFraction: 0.62).delay(0.1), value: appeared)
+
+                VStack(spacing: 12) {
+                    Text("Remember this")
                         .multilineTextAlignment(.center)
+                        .font(.timefoldSerif(40))
+                        .foregroundStyle(ink)
+                    Text("PHOTOS FROM THIS DAY,\nEVERY PAST YEAR")
+                        .metaLabel(11, color: inkSoft)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
                 }
+                .padding(.top, 30)
+                .opacity(appeared ? 1 : 0)
+                .offset(y: appeared ? 0 : 14)
+                .animation(.easeOut(duration: 0.5).delay(0.05), value: appeared)
+
+                Spacer()
+
+                VStack(spacing: 18) {
+                    Button(action: onRequest) {
+                        Text("Open My Memories")
+                            .font(.timefoldRounded(17, weight: .bold))
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Theme.brandGradient)
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
+                            .shadow(color: Theme.pink.opacity(0.35), radius: 16, y: 8)
+                    }
+
+                    VStack(spacing: 4) {
+                        Label("100% Private", systemImage: "lock.shield.fill")
+                            .font(.timefoldRounded(12))
+                            .foregroundStyle(inkSoft)
+                        Text("No accounts • No ads • Nothing leaves your device")
+                            .font(.system(size: 11))
+                            .foregroundStyle(inkSoft.opacity(0.75))
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .frame(maxWidth: 380)
+                .padding(.horizontal, 32)
+                .padding(.bottom, 40)
+                .opacity(appeared ? 1 : 0)
+                .animation(.easeOut(duration: 0.5).delay(0.45), value: appeared)
             }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 40)
+            .frame(maxWidth: .infinity)
         }
+        .onAppear { appeared = true }
+    }
+}
+
+// MARK: - Shared warm ornaments
+
+/// A soft radial "sun" hanging in the sky behind hero content.
+private struct SunGlow: View {
+    var body: some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    colors: [Color.white.opacity(Theme.isNightSky() ? 0.14 : 0.55), .clear],
+                    center: .center, startRadius: 10, endRadius: 260
+                )
+            )
+            .frame(width: 520, height: 520)
+            .offset(y: -140)
+            .allowsHitTesting(false)
+    }
+}
+
+/// Classic polaroid: white mat, square photo window, handwritten-ish caption.
+private struct PolaroidFrame<Photo: View>: View {
+    var caption: String?
+    var photoSize: CGFloat = 114
+    @ViewBuilder let photo: Photo
+
+    var body: some View {
+        VStack(spacing: 0) {
+            photo
+                .frame(width: photoSize, height: photoSize)
+                .clipShape(Rectangle())
+            ZStack {
+                if let caption {
+                    Text(caption)
+                        .font(.timefoldSerif(photoSize * 0.13, weight: .semibold))
+                        .italic()
+                        .foregroundStyle(Theme.ink.opacity(0.7))
+                }
+            }
+            .frame(width: photoSize, height: photoSize * 0.28)
+        }
+        .padding([.top, .horizontal], photoSize * 0.075)
+        .background(Theme.mat)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .shadow(color: .black.opacity(0.16), radius: 12, y: 8)
+        .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+    }
+}
+
+// MARK: - Branded States
+private struct BrandedLoadingView: View {
+    @State private var breathe = false
+
+    var body: some View {
+        ZStack {
+            Theme.sky().ignoresSafeArea()
+            SunGlow()
+            VStack(spacing: 22) {
+                // Tiny stack of polaroids gently breathing while we fetch —
+                // the same object the reveal is about to deal out.
+                ZStack {
+                    ForEach(0..<3, id: \.self) { i in
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Theme.mat)
+                            .frame(width: 74, height: 88)
+                            .shadow(color: .black.opacity(0.12), radius: 6, y: 4)
+                            .rotationEffect(.degrees(Double(i - 1) * (breathe ? 9 : 4)))
+                            .offset(y: CGFloat(i) * -2)
+                            .animation(
+                                .easeInOut(duration: 1.4).repeatForever(autoreverses: true).delay(Double(i) * 0.1),
+                                value: breathe
+                            )
+                    }
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(Theme.brandGradient)
+                }
+                Text("GATHERING YOUR MEMORIES")
+                    .metaLabel(11, color: Theme.skyInkSoft())
+            }
+        }
+        .onAppear { breathe = true }
+    }
+}
+
+private struct EmptyMemoriesView: View {
+    let date: Date
+    @State private var appeared = false
+    @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+
+    private var dateString: String {
+        let f = DateFormatter(); f.dateFormat = "MMMM d"; return f.string(from: date)
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.sky(for: Date()).ignoresSafeArea()
+            SunGlow()
+            VStack(spacing: 10) {
+                TimeSprite(mood: .sleepy, kind: MascotKind(rawValue: mascotRaw) ?? .foldy)
+                    .scaleEffect(0.62)
+                    .frame(height: 150)
+                Text(dateString)
+                    .font(.timefoldSerif(38))
+                    .foregroundStyle(Theme.skyInk())
+                Text("NO MEMORIES ON THIS DAY YET")
+                    .metaLabel(11, color: Theme.skyInkSoft())
+                Text("Today's photos become next year's memories.\nGo make one worth keeping.")
+                    .font(.timefoldRounded(14, weight: .medium))
+                    .foregroundStyle(Theme.skyInkSoft().opacity(0.9))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 44)
+                    .padding(.top, 6)
+            }
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared ? 0 : 16)
+            .animation(.easeOut(duration: 0.5), value: appeared)
+        }
+        .onAppear { appeared = true }
     }
 }
 
 private struct MemoriesGridView: View {
     let assets: [PHAsset]
+    var isRevealActive: Bool = false
     @Binding var isGridViewMode: ContentView.ViewMode
     @Binding var isSelecting: Bool
     @Binding var selectedAssets: Set<String>
     @Binding var showingDeleteConfirmation: Bool
-    
+
     private let spacing: CGFloat = 2
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
-    
+
     @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
 
+    @Namespace private var heroNS
+    @State private var entered = false
     @State private var deletedAssets: Set<String> = []
     @State private var isScrolling = false
     @State private var currentYear: Int?
@@ -371,8 +693,9 @@ private struct MemoriesGridView: View {
                 VStack {
                     Spacer()
                     Text(String(year))
-                        .font(.system(size: 80, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary.opacity(0.35))
+                        .font(.timefoldSerif(84))
+                        .foregroundStyle(.primary.opacity(0.32))
+                        .shadow(color: Color(uiColor: .systemBackground).opacity(0.6), radius: 12)
                     Spacer()
                 }
                 .allowsHitTesting(false)
@@ -406,7 +729,7 @@ private struct MemoriesGridView: View {
     private var gridContent: some View {
         GeometryReader { geo in
             let cell = (geo.size.width - spacing * 2) / 3
-            
+
             ScrollView {
                 LazyVGrid(columns: columns, spacing: spacing) {
                     ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
@@ -417,12 +740,18 @@ private struct MemoriesGridView: View {
                                 cellSize: cell,
                                 isSelecting: isSelecting,
                                 isSelected: selectedAssets.contains(asset.localIdentifier),
-                                onToggleSelection: {
-                                    toggleSelection(for: asset)
-                                },
-                                onDelete: {
-                                    deletePhoto(asset: asset)
-                                }
+                                namespace: heroNS,
+                                onToggleSelection: { toggleSelection(for: asset) },
+                                onDelete: { deletePhoto(asset: asset) }
+                            )
+                            // Cascade the first screenful in when the reveal
+                            // lifts; cells created later mount already-entered.
+                            .opacity(entered ? 1 : 0)
+                            .scaleEffect(entered ? 1 : 0.88)
+                            .animation(
+                                .spring(response: 0.5, dampingFraction: 0.8)
+                                    .delay(min(Double(index) * 0.025, 0.45)),
+                                value: entered
                             )
                             .background(
                                 GeometryReader { itemGeo in
@@ -431,9 +760,7 @@ private struct MemoriesGridView: View {
                                             key: ScrollOffsetPreferenceKey.self,
                                             value: itemGeo.frame(in: .named("scroll")).minY
                                         )
-                                        .onAppear {
-                                            updateYearIfVisible(itemGeo: itemGeo, asset: asset)
-                                        }
+                                        .onAppear { updateYearIfVisible(itemGeo: itemGeo, asset: asset) }
                                         .onChange(of: itemGeo.frame(in: .named("scroll")).minY) { _ in
                                             updateYearIfVisible(itemGeo: itemGeo, asset: asset)
                                         }
@@ -447,6 +774,12 @@ private struct MemoriesGridView: View {
             .coordinateSpace(name: "scroll")
             .scrollIndicators(.hidden)
             .ignoresSafeArea(edges: .bottom)
+            .onAppear {
+                if !isRevealActive { entered = true }
+            }
+            .onChange(of: isRevealActive) {
+                if !isRevealActive { entered = true }
+            }
         }
     }
     
@@ -518,9 +851,10 @@ private struct GridCellView: View {
     let cellSize: CGFloat
     let isSelecting: Bool
     let isSelected: Bool
+    let namespace: Namespace.ID
     let onToggleSelection: () -> Void
     let onDelete: () -> Void
-    
+
     var body: some View {
         ZStack {
             if isSelecting {
@@ -535,17 +869,19 @@ private struct GridCellView: View {
                 // In normal mode, use NavigationLink
                 NavigationLink {
                     MemoryPagerView(assets: assets, startAsset: asset)
+                        .heroDestination(asset.localIdentifier, namespace)
                 } label: {
                     cellContent
                 }
                 .buttonStyle(.plain)
+                .heroSource(asset.localIdentifier, namespace)
                 .contextMenu {
                     Button(role: .destructive, action: onDelete) {
                         Label(asset.mediaType == .video ? "Delete Video" : "Delete Photo", systemImage: "trash")
                     }
                 }
             }
-            
+
             // Selection overlay
             if isSelecting {
                 VStack {
@@ -555,7 +891,7 @@ private struct GridCellView: View {
                             Circle()
                                 .fill(isSelected ? Color.blue : Color.white.opacity(0.3))
                                 .frame(width: 28, height: 28)
-                            
+
                             if isSelected {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 14, weight: .bold))
@@ -574,14 +910,14 @@ private struct GridCellView: View {
             }
         }
     }
-    
+
     private var cellContent: some View {
         ZStack {
             AssetThumbnailView(asset: asset)
                 .frame(width: cellSize, height: cellSize)
                 .clipped()
                 .opacity(isSelecting && !isSelected ? 0.6 : 1.0)
-            
+
             // Video play icon overlay
             if asset.mediaType == .video {
                 VStack {
@@ -591,13 +927,13 @@ private struct GridCellView: View {
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 2)
-                        
+
                         // Video duration
                         Text(formatDuration(asset.duration))
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 2)
-                        
+
                         Spacer()
                     }
                     .padding(6)
@@ -605,7 +941,7 @@ private struct GridCellView: View {
             }
         }
     }
-    
+
     private func formatDuration(_ duration: TimeInterval) -> String {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
@@ -615,6 +951,7 @@ private struct GridCellView: View {
 
 private struct AssetThumbnailView: View {
     let asset: PHAsset
+    var targetSize: CGSize = CGSize(width: 300, height: 300)
     @State private var image: UIImage?
 
     var body: some View {
@@ -623,15 +960,12 @@ private struct AssetThumbnailView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .transition(.opacity.combined(with: .scale(scale: 1.04)))
             } else {
-                Rectangle()
-                    .fill(.quaternary)
-                    .overlay {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
+                ShimmerView()
             }
         }
+        .animation(.easeOut(duration: 0.35), value: image == nil)
         .task {
             await load()
         }
@@ -643,10 +977,9 @@ private struct AssetThumbnailView: View {
         opts.resizeMode = .fast
         opts.isNetworkAccessAllowed = true
 
-        let target = CGSize(width: 300, height: 300)
         PHImageManager.default().requestImage(
             for: asset,
-            targetSize: target,
+            targetSize: targetSize,
             contentMode: .aspectFill,
             options: opts
         ) { img, _ in
@@ -671,6 +1004,7 @@ private struct MemoryPagerView: View {
     @State private var storyImages: [String: UIImage] = [:]
     @State private var dragOffset: CGFloat = 0
     @State private var opacity: Double = 1.0
+    @State private var isZoomed = false
     @GestureState private var dragState: CGFloat = 0
     
     enum ShareItem {
@@ -710,7 +1044,8 @@ private struct MemoryPagerView: View {
                         onStoryImageReady: { storyImg in
                             storyImages[asset.localIdentifier] = storyImg
                         },
-                        dragOffset: dragOffset
+                        dragOffset: dragOffset,
+                        onZoomChanged: { isZoomed = $0 }
                     )
                     .tag(index)
                 }
@@ -719,24 +1054,29 @@ private struct MemoryPagerView: View {
             .indexViewStyle(.page(backgroundDisplayMode: .always))
             .offset(y: dragOffset)
             .opacity(opacity)
+            .onChange(of: selection) { isZoomed = false }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 20)
                     .onChanged { value in
+                        // While a photo is zoomed in, the child owns all panning —
+                        // stand down so dragging the photo doesn't trigger dismiss.
+                        guard !isZoomed else { return }
                         // Only respond to primarily vertical downward drags
                         let verticalAmount = value.translation.height
                         let horizontalAmount = abs(value.translation.width)
-                        
+
                         // If it's more horizontal than vertical, let TabView handle it
                         guard verticalAmount > horizontalAmount else { return }
                         guard verticalAmount > 0 else { return }
-                        
+
                         dragOffset = verticalAmount
                         opacity = max(0.5, 1.0 - (verticalAmount / 500))
                     }
                     .onEnded { value in
+                        guard !isZoomed else { return }
                         let verticalAmount = value.translation.height
                         let horizontalAmount = abs(value.translation.width)
-                        
+
                         // Only dismiss if it was a vertical drag
                         guard verticalAmount > horizontalAmount else {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -776,9 +1116,9 @@ private struct MemoryPagerView: View {
                         Text(yearsAgoText(from: date))
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(.ultraThinMaterial, in: Capsule())
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
+                            .shadow(color: .black.opacity(0.25), radius: 1)
                             .padding(.trailing)
                     }
                     .padding(.top, 60)
@@ -948,7 +1288,8 @@ private struct PagedPhotoView: View {
     let onImageReady: (UIImage?) -> Void
     let onStoryImageReady: (UIImage?) -> Void
     let dragOffset: CGFloat
-    
+    var onZoomChanged: (Bool) -> Void = { _ in }
+
     @State private var image: UIImage?
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -995,23 +1336,9 @@ private struct PagedPhotoView: View {
                             .scaledToFit()
                             .scaleEffect(scale)
                             .offset(offset)
-                            .gesture(
-                                MagnifyGesture()
-                                    .onChanged { value in
-                                        guard dragOffset == 0 else { return }
-                                        let newScale = lastScale * value.magnification
-                                        scale = min(max(newScale, 1.0), 4.0)
-                                    }
-                                    .onEnded { _ in
-                                        lastScale = scale
-                                        if scale <= 1.0 {
-                                            withAnimation(.spring(response: 0.3)) {
-                                                scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero
-                                            }
-                                        }
-                                    }
-                            )
-                            .gesture(
+                            // Pan takes priority over the TabView's paging swipe, but
+                            // only while zoomed in (otherwise paging works normally).
+                            .highPriorityGesture(
                                 DragGesture()
                                     .onChanged { value in
                                         guard dragOffset == 0 else { return }
@@ -1024,27 +1351,54 @@ private struct PagedPhotoView: View {
                                     .onEnded { _ in lastOffset = offset },
                                 including: scale > 1.0 ? .all : .none
                             )
+                            .gesture(
+                                MagnifyGesture()
+                                    .onChanged { value in
+                                        guard dragOffset == 0 else { return }
+                                        let newScale = lastScale * value.magnification
+                                        scale = min(max(newScale, 1.0), 4.0)
+                                        // Keep the pan inside bounds as we zoom out.
+                                        offset = constrainOffset(offset, scale: scale, geo: geo)
+                                    }
+                                    .onEnded { _ in
+                                        if scale <= 1.0 {
+                                            withAnimation(.spring(response: 0.3)) {
+                                                scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero
+                                            }
+                                        } else {
+                                            lastScale = scale
+                                            lastOffset = offset
+                                        }
+                                        reportZoom()
+                                    }
+                            )
                             .onTapGesture(count: 2) { location in
                                 guard dragOffset == 0 else { return }
-                                withAnimation(.spring(response: 0.3)) {
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
                                     if scale > 1.0 {
                                         scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero
                                     } else {
-                                        scale = 2.0; lastScale = 2.0
+                                        let targetScale: CGFloat = 2.5
+                                        scale = targetScale; lastScale = targetScale
+                                        // Center the tapped point, then clamp to valid bounds.
                                         let tapPoint = CGPoint(
                                             x: location.x - geo.size.width / 2,
                                             y: location.y - geo.size.height / 2
                                         )
-                                        offset = CGSize(width: -tapPoint.x * 0.5, height: -tapPoint.y * 0.5)
+                                        let raw = CGSize(width: -tapPoint.x * (targetScale - 1),
+                                                         height: -tapPoint.y * (targetScale - 1))
+                                        offset = constrainOffset(raw, scale: targetScale, geo: geo)
                                         lastOffset = offset
                                     }
                                 }
+                                reportZoom()
                             }
                             .onChange(of: dragOffset) {
                                 if dragOffset > 0 && scale != 1.0 {
                                     withAnimation(.spring(response: 0.2)) {
                                         scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero
                                     }
+                                    reportZoom()
                                 }
                             }
                     } else {
@@ -1054,7 +1408,7 @@ private struct PagedPhotoView: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .background(Color.black)
+            .background(ambientBackdrop)
         }
         .task {
             await loadFull()
@@ -1063,13 +1417,46 @@ private struct PagedPhotoView: View {
             player?.pause()
             player = nil
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            onZoomChanged(false)
         }
     }
     
+    // Ambient backdrop: a heavily blurred, darkened copy of the current photo
+    // instead of a flat black void — the Apple Music / Photos full-screen feel.
+    @ViewBuilder
+    private var ambientBackdrop: some View {
+        ZStack {
+            Color.black
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: 60, opaque: true)
+                    .overlay(Color.black.opacity(0.45))
+            }
+        }
+        .ignoresSafeArea()
+        .animation(.easeOut(duration: 0.4), value: image == nil)
+    }
+
+    private func reportZoom() {
+        onZoomChanged(scale > 1.0)
+    }
+
+    /// The size the (aspect-fit) image actually occupies on screen before scaling.
+    private func fittedImageSize(in container: CGSize) -> CGSize {
+        guard let image, image.size.width > 0, image.size.height > 0 else { return container }
+        let fit = min(container.width / image.size.width, container.height / image.size.height)
+        return CGSize(width: image.size.width * fit, height: image.size.height * fit)
+    }
+
     private func constrainOffset(_ offset: CGSize, scale: CGFloat, geo: GeometryProxy) -> CGSize {
         guard scale > 1.0 else { return .zero }
-        let maxOffsetX = (geo.size.width * (scale - 1)) / 2
-        let maxOffsetY = (geo.size.height * (scale - 1)) / 2
+        // Bound to the *actual* scaled photo, not the full screen, so you can't
+        // drag the image off into the letterboxed dead-space.
+        let fitted = fittedImageSize(in: geo.size)
+        let maxOffsetX = max(0, (fitted.width * scale - geo.size.width) / 2)
+        let maxOffsetY = max(0, (fitted.height * scale - geo.size.height) / 2)
         return CGSize(
             width: min(max(offset.width, -maxOffsetX), maxOffsetX),
             height: min(max(offset.height, -maxOffsetY), maxOffsetY)
@@ -1491,13 +1878,7 @@ struct DatePickerView: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(
-                            LinearGradient(
-                                colors: [.orange, .pink],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        .background(Theme.brandGradient)
                         .foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
@@ -1522,10 +1903,21 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
     @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
+    @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    MascotPicker(selectedRaw: $mascotRaw)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                } header: {
+                    Text("Companion")
+                } footer: {
+                    Text("Pick the little friend who greets you each day.")
+                }
+
                 Section {
                     Toggle("Daily Reminder", isOn: $notificationManager.isEnabled)
                     
@@ -1591,239 +1983,719 @@ struct SettingsView: View {
 
 // MARK: - Daily Reveal
 
+// MARK: - Mascot picker (Settings)
+
+private struct MascotPicker: View {
+    @Binding var selectedRaw: String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(MascotKind.allCases) { kind in
+                    let isSelected = kind.rawValue == selectedRaw
+                    VStack(spacing: 4) {
+                        TimeSprite(mood: .happy, kind: kind)
+                            .scaleEffect(0.42)
+                            .frame(width: 80, height: 90)
+                        Text(kind.displayName)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(isSelected ? Color.primary : .secondary)
+                        Text(kind.blurb)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
+                    .frame(width: 106)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(isSelected ? Theme.pink.opacity(0.12) : Color(uiColor: .secondarySystemGroupedBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(isSelected ? Theme.pink : Color.clear, lineWidth: 2)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .onTapGesture {
+                        Haptics.tap(.light)
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            selectedRaw = kind.rawValue
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+        }
+    }
+}
+
+// MARK: - Daily Reveal — a little time sprite who greets you each day.
+
+private enum SpriteMood: Equatable {
+    case sleepy, happy, delighted
+    static func forCount(_ n: Int) -> SpriteMood {
+        if n >= 10 { return .delighted }
+        if n >= 4 { return .happy }
+        return .sleepy
+    }
+}
+
+/// The five companions the user can choose between. Each shares the same
+/// face/mood machinery but has a distinct silhouette, palette and topper.
+enum MascotKind: String, CaseIterable, Identifiable {
+    case foldy, pip, luna, mochi, ember
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .foldy: return "Foldy"
+        case .pip:   return "Pip"
+        case .luna:  return "Luna"
+        case .mochi: return "Mochi"
+        case .ember: return "Ember"
+        }
+    }
+
+    var blurb: String {
+        switch self {
+        case .foldy: return "the timekeeper"
+        case .pip:   return "the sprout"
+        case .luna:  return "the dreamer"
+        case .mochi: return "the kitty"
+        case .ember: return "the spark"
+        }
+    }
+}
+
+private let mascotStorageKey = "selectedMascot"
+
 private struct DailyRevealView: View {
     let assets: [PHAsset]
     let date: Date
     let onComplete: () -> Void
 
-    @State private var titleOpacity: Double = 0
-    @State private var titleOffset: CGFloat = 28
-    @State private var subtitleOpacity: Double = 0
-    @State private var revealedCount: Int = 0
-    @State private var hintOpacity: Double = 0
+    // Sequence beats
+    @State private var showMeta = false
+    @State private var showHeadline = false
+    @State private var dealt = 0              // how many cards are on the table
+    @State private var spriteUp = false
+    @State private var showBubble = false
+    @State private var showHint = false
+    @State private var flungAway = false      // dismissal: cards fly off the top
     @State private var isDismissing = false
-    #if DEBUG
-    @State private var debugBackdropIndex: Int? = nil
-    #endif
 
-    private static let backgrounds: [(Color, Color)] = [
-        (.black, .black),                                                                                   // pure black
-        (Color(red: 0.06, green: 0.00, blue: 0.14), Color(red: 0.02, green: 0.00, blue: 0.08)),           // deep violet
-        (Color(red: 0.00, green: 0.04, blue: 0.14), Color(red: 0.00, green: 0.02, blue: 0.08)),           // deep navy
-        (Color(red: 0.10, green: 0.01, blue: 0.02), Color(red: 0.05, green: 0.00, blue: 0.01)),           // deep crimson
-        (Color(red: 0.00, green: 0.08, blue: 0.08), Color(red: 0.00, green: 0.03, blue: 0.04)),           // deep teal
-        (Color(red: 0.10, green: 0.05, blue: 0.00), Color(red: 0.05, green: 0.02, blue: 0.00)),           // deep amber
-        (Color(red: 0.10, green: 0.00, blue: 0.08), Color(red: 0.05, green: 0.00, blue: 0.04)),           // deep magenta
-        (Color(red: 0.00, green: 0.02, blue: 0.14), Color(red: 0.00, green: 0.01, blue: 0.08)),           // deep cobalt
-        (Color(red: 0.02, green: 0.08, blue: 0.02), Color(red: 0.01, green: 0.04, blue: 0.01)),           // deep forest
-        (Color(red: 0.00, green: 0.08, blue: 0.10), Color(red: 0.00, green: 0.03, blue: 0.05)),           // dark cyan
-        (Color(red: 0.10, green: 0.02, blue: 0.05), Color(red: 0.05, green: 0.01, blue: 0.02)),           // dark rose
-        (Color(red: 0.07, green: 0.04, blue: 0.00), Color(red: 0.04, green: 0.02, blue: 0.00)),           // dark bourbon
-        (Color(red: 0.04, green: 0.02, blue: 0.12), Color(red: 0.02, green: 0.01, blue: 0.06)),           // dark indigo
-        (Color(red: 0.08, green: 0.04, blue: 0.04), Color(red: 0.04, green: 0.02, blue: 0.02)),           // dark ember
-    ]
+    @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+    private var kind: MascotKind { MascotKind(rawValue: mascotRaw) ?? .foldy }
 
-    private var backgroundColors: (Color, Color) {
-        #if DEBUG
-        let index = debugBackdropIndex ?? (Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0)
-        #else
-        let index = Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0
-        #endif
-        return Self.backgrounds[index % Self.backgrounds.count]
+    private var count: Int { assets.count }
+    private var mood: SpriteMood { SpriteMood.forCount(count) }
+
+    private var fanAssets: [PHAsset] { Array(assets.prefix(5)) }
+
+    private var metaString: String {
+        let f = DateFormatter(); f.dateFormat = "EEEE · MMMM d"
+        return f.string(from: date).uppercased()
     }
 
-    private var previewAssets: [PHAsset] {
-        Array(assets.reversed().prefix(photoLayouts.count))
+    private var headlineString: String {
+        count == 1 ? "1 memory" : "\(count) memories"
     }
 
-    private var dateString: String {
-        let f = DateFormatter()
-        f.dateFormat = "MMMM d"
-        return f.string(from: date)
-    }
-
-    private var memoryCountString: String {
-        let count = assets.count
-        let years = Set(assets.compactMap { $0.creationDate }.map {
+    private var yearSpan: Int {
+        Set(assets.compactMap { $0.creationDate }.map {
             Calendar.current.component(.year, from: $0)
         }).count
-        let noun = count == 1 ? "memory" : "memories"
-        return years > 1 ? "\(count) \(noun) across \(years) years" : "\(count) \(noun)"
     }
 
-    private let photoLayouts: [(CGSize, Double)] = [
-        (CGSize(width: -75, height: -18), -8.0),
-        (CGSize(width: 68,  height: -48),  7.5),
-        (CGSize(width: 12,  height:  52), -3.5),
-        (CGSize(width: -58, height:  82), 12.0),
-        (CGSize(width: 90,  height:  36), -11.5),
-    ]
+    private var subtitleString: String {
+        yearSpan > 1 ? "ACROSS \(yearSpan) YEARS" : "FROM THIS DAY"
+    }
 
-    private static let miamiPink  = Color(red: 1.00, green: 0.18, blue: 0.33)   // brand pink
-    private static let miamiTeal  = Color(red: 1.00, green: 0.58, blue: 0.00)   // brand orange
-    private static let miamiCream = Color(red: 0.97, green: 0.93, blue: 0.86)
-    private static let miamiNight = Color(red: 0.04, green: 0.02, blue: 0.14)
+    /// A tiny bit of companion personality, stable for the whole day.
+    private var bubbleText: String {
+        let lines: [String]
+        switch Theme.daypart() {
+        case .sunrise: lines = ["good morning!", "rise and shine!", "morning, you!"]
+        case .day:     lines = ["welcome back!", "hi again!", "there you are!"]
+        case .dusk:    lines = ["good evening!", "hey, you made it!", "evening!"]
+        case .night:   lines = ["up late? me too", "psst… look!", "night owl club"]
+        }
+        let seed = Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0
+        return lines[seed % lines.count]
+    }
+
+    private var ink: Color { Theme.skyInk(for: Date()) }
+    private var inkSoft: Color { Theme.skyInkSoft(for: Date()) }
+
+    /// Where each card rests in the fan — spread *across*, left to right,
+    /// each card landing on top of the previous one (dealt across a table),
+    /// following a gentle arc.
+    private func slot(_ i: Int, of n: Int) -> (offset: CGSize, rotation: Double) {
+        let t = Double(i) - Double(n - 1) / 2
+        let jitter: [Double] = [-1.5, 1.0, -0.5, 1.5, -1.0]
+        return (
+            CGSize(width: t * 43, height: pow(abs(t), 1.6) * 9),
+            t * 7 + jitter[i % jitter.count]
+        )
+    }
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [backgroundColors.0, backgroundColors.1],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            Theme.sky().ignoresSafeArea()
+            SunGlow()
+            FloatingMotes()
 
-            // Scattered polaroid cards
-            ZStack {
-                ForEach(Array(previewAssets.enumerated()), id: \.element.localIdentifier) { index, asset in
-                    RevealPhotoCard(asset: asset)
-                        .opacity(index < revealedCount ? 1.0 : 0.0)
-                        .scaleEffect(index < revealedCount ? 1.0 : 0.88)
-                        .offset(
-                            x: photoLayouts[index].0.width,
-                            y: photoLayouts[index].0.height + (index < revealedCount ? 0 : 36)
-                        )
-                        .rotationEffect(.degrees(photoLayouts[index].1))
-                        .animation(.spring(response: 0.55, dampingFraction: 0.75), value: revealedCount)
+            VStack(spacing: 0) {
+                // Date + count header
+                VStack(spacing: 10) {
+                    Text(metaString)
+                        .metaLabel(12, color: inkSoft)
+                        .opacity(showMeta ? 1 : 0)
+                        .offset(y: showMeta ? 0 : -8)
+
+                    Text(headlineString)
+                        .font(.timefoldSerif(44))
+                        .foregroundStyle(ink)
+                        .opacity(showHeadline ? 1 : 0)
+                        .scaleEffect(showHeadline ? 1 : 0.92)
+                        .blur(radius: showHeadline ? 0 : 6)
+
+                    Text(subtitleString)
+                        .metaLabel(11, color: inkSoft.opacity(0.85))
+                        .opacity(showHeadline ? 1 : 0)
                 }
-            }
+                .padding(.top, 96)
 
-            // Night scrim
-            LinearGradient(
-                colors: [Self.miamiNight.opacity(0.9), .clear, Self.miamiNight.opacity(0.75)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-
-            // CRT scan lines
-            Canvas { context, size in
-                var y: CGFloat = 0
-                while y < size.height {
-                    context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)), with: .color(.black.opacity(0.07)))
-                    y += 3
-                }
-            }
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-
-            // Date headline + count
-            VStack(spacing: 12) {
-                Text(dateString)
-                    .font(.system(size: 52, weight: .bold, design: .serif))
-                    .foregroundStyle(Self.miamiCream)
-                    .shadow(color: Self.miamiPink.opacity(1.0), radius: 6)
-                    .shadow(color: Self.miamiPink.opacity(0.6), radius: 20)
-                    .shadow(color: Self.miamiPink.opacity(0.25), radius: 50)
-                Text(memoryCountString.uppercased())
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .kerning(3)
-                    .foregroundStyle(Self.miamiTeal)
-                    .shadow(color: Self.miamiTeal.opacity(1.0), radius: 6)
-                    .shadow(color: Self.miamiTeal.opacity(0.6), radius: 20)
-                    .shadow(color: Self.miamiTeal.opacity(0.2), radius: 40)
-                    .opacity(subtitleOpacity)
-            }
-            .opacity(titleOpacity)
-            .offset(y: titleOffset)
-
-            // Tap hint
-            VStack {
                 Spacer()
-                Text("TAP TO CONTINUE")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .kerning(3)
-                    .foregroundStyle(Self.miamiPink.opacity(0.45))
-                    .shadow(color: Self.miamiPink.opacity(0.5), radius: 10)
-                    .padding(.bottom, 52)
-            }
-            .opacity(hintOpacity)
 
-            #if DEBUG
-            VStack {
-                HStack {
-                    Button {
-                        let current = debugBackdropIndex ?? (Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0)
-                        debugBackdropIndex = (current + 1) % Self.backgrounds.count
-                    } label: {
-                        Text("backdrop \((debugBackdropIndex ?? (Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 0)) % Self.backgrounds.count + 1)/\(Self.backgrounds.count)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .padding(8)
-                            .background(.white.opacity(0.1))
-                            .clipShape(Capsule())
+                // The hand of memories, dealt one by one
+                ZStack {
+                    ForEach(Array(fanAssets.enumerated()), id: \.element.localIdentifier) { i, asset in
+                        let n = fanAssets.count
+                        let s = slot(i, of: n)
+                        let onTable = i < dealt
+
+                        RevealPolaroid(asset: asset)
+                            .rotationEffect(.degrees(
+                                flungAway ? s.rotation * 3 : (onTable ? s.rotation : 0)
+                            ))
+                            .offset(
+                                x: onTable ? s.offset.width : 0,
+                                y: flungAway
+                                    ? s.offset.height - 720
+                                    : (onTable ? s.offset.height : 240)
+                            )
+                            .scaleEffect(onTable ? 1 : 0.55)
+                            .opacity(onTable ? 1 : 0)
+                            .zIndex(Double(i)) // dealt across: each card lands on the last
+                            .animation(
+                                flungAway
+                                    ? .easeIn(duration: 0.32).delay(Double(i) * 0.04)
+                                    : .spring(response: 0.55, dampingFraction: 0.72),
+                                value: flungAway
+                            )
+                            .animation(.spring(response: 0.55, dampingFraction: 0.72), value: dealt)
                     }
-                    Spacer()
                 }
-                .padding(.top, 60)
-                .padding(.leading, 16)
+                .frame(height: 280)
+
                 Spacer()
+
+                // The companion, peeking up from the bottom to greet you
+                ZStack(alignment: .top) {
+                    TimeSprite(mood: mood, kind: kind)
+                        .scaleEffect(0.72, anchor: .bottom)
+                        .offset(y: spriteUp && !flungAway ? 0 : 190)
+                        .animation(.spring(response: 0.5, dampingFraction: 0.62), value: spriteUp)
+                        .animation(.easeIn(duration: 0.25), value: flungAway)
+
+                    SpeechBubbleView(text: bubbleText)
+                        .scaleEffect(showBubble && !flungAway ? 1 : 0, anchor: .bottom)
+                        .offset(y: -46)
+                        .animation(.spring(response: 0.38, dampingFraction: 0.6), value: showBubble)
+                        .animation(.easeIn(duration: 0.18), value: flungAway)
+                }
+                .frame(height: 190)
+
+                Text("tap to open")
+                    .font(.timefoldRounded(13, weight: .medium))
+                    .foregroundStyle(inkSoft.opacity(0.7))
+                    .padding(.top, 12)
+                    .padding(.bottom, 46)
+                    .opacity(showHint && !flungAway ? 1 : 0)
             }
-            #endif
         }
+        .contentShape(Rectangle())
         .onTapGesture { completeDismiss() }
         .task { await runSequence() }
     }
 
     private func runSequence() async {
+        withAnimation(.easeOut(duration: 0.45)) { showMeta = true }
         try? await Task.sleep(nanoseconds: 150_000_000)
-        withAnimation(.easeOut(duration: 0.5)) {
-            titleOpacity = 1
-            titleOffset = 0
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { showHeadline = true }
+        try? await Task.sleep(nanoseconds: 280_000_000)
+
+        for i in 0..<fanAssets.count {
+            dealt = i + 1
+            Haptics.tap(.light)
+            try? await Task.sleep(nanoseconds: 110_000_000)
         }
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        withAnimation(.easeOut(duration: 0.35)) { subtitleOpacity = 1 }
-        try? await Task.sleep(nanoseconds: 350_000_000)
-        for i in 0..<min(previewAssets.count, photoLayouts.count) {
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            withAnimation { revealedCount = i + 1 }
-        }
-        try? await Task.sleep(nanoseconds: 250_000_000)
-        withAnimation(.easeIn(duration: 0.3)) { hintOpacity = 1 }
-        try? await Task.sleep(nanoseconds: 700_000_000)
+
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        spriteUp = true
+        Haptics.tap(.medium)
+        try? await Task.sleep(nanoseconds: 380_000_000)
+        showBubble = true
+        Haptics.tap(.soft)
+        try? await Task.sleep(nanoseconds: 1_100_000_000)
+        withAnimation(.easeIn(duration: 0.5)) { showHint = true }
+
+        // Linger, then let the user in. Their moment — no rush.
+        try? await Task.sleep(nanoseconds: 7_000_000_000)
         completeDismiss()
     }
 
     private func completeDismiss() {
         guard !isDismissing else { return }
         isDismissing = true
-        onComplete()
+        Haptics.tap(.soft)
+        // Cards fling off the top, companion ducks away, then the scene lifts.
+        flungAway = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+            onComplete()
+        }
     }
 }
 
-private struct RevealPhotoCard: View {
+/// One dealt memory in the reveal fan.
+private struct RevealPolaroid: View {
     let asset: PHAsset
     @State private var image: UIImage?
 
+    private var yearCaption: String {
+        guard let d = asset.creationDate else { return "" }
+        return String(Calendar.current.component(.year, from: d))
+    }
+
+    var body: some View {
+        PolaroidFrame(caption: yearCaption, photoSize: 148) {
+            ZStack {
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Theme.pink.opacity(0.15)
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        let opts = PHImageRequestOptions()
+        opts.deliveryMode = .opportunistic
+        opts.resizeMode = .fast
+        opts.isNetworkAccessAllowed = true
+        PHImageManager.default().requestImage(
+            for: asset,
+            targetSize: CGSize(width: 400, height: 400),
+            contentMode: .aspectFill,
+            options: opts
+        ) { img, _ in
+            DispatchQueue.main.async { self.image = img }
+        }
+    }
+}
+
+/// Soft dust-mote particles drifting up the reveal — barely-there warmth.
+private struct FloatingMotes: View {
+    private struct Mote: Identifiable {
+        let id: Int
+        let x: CGFloat        // 0...1 across the width
+        let size: CGFloat
+        let duration: Double
+        let delay: Double
+        let opacity: Double
+    }
+
+    private let motes: [Mote] = (0..<9).map { i in
+        var rng = SeededRandom(seed: UInt64(i) &* 0x9E3779B9)
+        return Mote(
+            id: i,
+            x: CGFloat(rng.next(in: 0.05...0.95)),
+            size: CGFloat(rng.next(in: 3...7)),
+            duration: rng.next(in: 9...16),
+            delay: rng.next(in: 0...5),
+            opacity: rng.next(in: 0.12...0.30)
+        )
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ForEach(motes) { mote in
+                DriftingMote(mote: (mote.size, mote.duration, mote.delay, mote.opacity),
+                             x: mote.x * geo.size.width,
+                             height: geo.size.height)
+            }
+        }
+        .allowsHitTesting(false)
+        .ignoresSafeArea()
+    }
+}
+
+private struct DriftingMote: View {
+    let mote: (size: CGFloat, duration: Double, delay: Double, opacity: Double)
+    let x: CGFloat
+    let height: CGFloat
+    @State private var risen = false
+
+    var body: some View {
+        Circle()
+            .fill(.white)
+            .frame(width: mote.size, height: mote.size)
+            .opacity(risen ? 0 : mote.opacity)
+            .blur(radius: 0.6)
+            .position(x: x, y: risen ? -20 : height + 20)
+            .onAppear {
+                withAnimation(
+                    .linear(duration: mote.duration)
+                    .repeatForever(autoreverses: false)
+                    .delay(mote.delay)
+                ) {
+                    risen = true
+                }
+            }
+    }
+}
+
+/// Tiny deterministic RNG so decorative layouts are stable between renders.
+private struct SeededRandom {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed &+ 0x9E3779B97F4A7C15 }
+    mutating func next() -> Double {
+        state ^= state << 13; state ^= state >> 7; state ^= state << 17
+        return Double(state % 10_000) / 10_000
+    }
+    mutating func next(in range: ClosedRange<Double>) -> Double {
+        range.lowerBound + next() * (range.upperBound - range.lowerBound)
+    }
+}
+
+// MARK: - The sprite
+
+private struct TimeSprite: View {
+    let mood: SpriteMood
+    var kind: MascotKind = .foldy
+
+    @State private var eyeOpen: CGFloat = 1
+    @State private var bob: CGFloat = 0
+    @State private var waveAngle: Double = 0
+    @State private var twinkle = false
+
+    private let bodySize: CGFloat = 150
+    private let inkColor = Color(red: 0.20, green: 0.13, blue: 0.16)
+
+    private var eyeHeight: CGFloat {
+        switch mood { case .sleepy: return 11; case .happy: return 18; case .delighted: return 21 }
+    }
+
+    private let sparkleOffsets: [CGSize] = [
+        CGSize(width: -86, height: -72),
+        CGSize(width:  90, height: -54),
+        CGSize(width: -98, height:  12),
+        CGSize(width:  96, height:  32),
+        CGSize(width:   0, height: -98),
+    ]
+
+    // MARK: per-mascot styling
+
+    private var gradient: LinearGradient {
+        let c: [Color]
+        switch kind {
+        case .foldy: c = [Theme.orange, Theme.pink]
+        case .pip:   c = [Color(red: 1.00, green: 0.86, blue: 0.42), Color(red: 1.00, green: 0.70, blue: 0.40)]
+        case .luna:  c = [Color(red: 0.74, green: 0.72, blue: 0.97), Color(red: 0.55, green: 0.53, blue: 0.86)]
+        case .mochi: c = [Color(red: 0.62, green: 0.92, blue: 0.82), Color(red: 0.34, green: 0.78, blue: 0.74)]
+        case .ember: c = [Color(red: 1.00, green: 0.62, blue: 0.42), Color(red: 0.95, green: 0.30, blue: 0.34)]
+        }
+        return LinearGradient(colors: c, startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private var accent: Color {
+        switch kind {
+        case .foldy: return Theme.pink
+        case .pip:   return Color(red: 1.00, green: 0.55, blue: 0.45)
+        case .luna:  return Color(red: 0.60, green: 0.55, blue: 0.95)
+        case .mochi: return Color(red: 0.95, green: 0.55, blue: 0.60)
+        case .ember: return Color(red: 0.98, green: 0.40, blue: 0.42)
+        }
+    }
+
+    // Distinct silhouettes per mascot.
+    @ViewBuilder private var bodyBlob: some View {
+        switch kind {
+        case .foldy, .luna:
+            Circle().fill(gradient).frame(width: bodySize, height: bodySize)
+        case .pip:
+            Ellipse().fill(gradient).frame(width: bodySize * 0.84, height: bodySize) // egg
+        case .mochi:
+            RoundedRectangle(cornerRadius: bodySize * 0.40, style: .continuous)
+                .fill(gradient).frame(width: bodySize, height: bodySize * 0.94)        // squishy
+        case .ember:
+            Capsule().fill(gradient).frame(width: bodySize * 0.80, height: bodySize)   // bean
+        }
+    }
+
+    @ViewBuilder private var topper: some View {
+        switch kind {
+        case .foldy: clockTopknot
+        case .pip:   sproutTopper
+        case .luna:  starTopper
+        case .mochi: EmptyView()      // mochi wears ears instead
+        case .ember: flameTopper
+        }
+    }
+
     var body: some View {
         ZStack {
-            Color.gray.opacity(0.15)
-            if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+            // Soft ground shadow
+            Ellipse()
+                .fill(Color.black.opacity(0.12))
+                .frame(width: bodySize * 0.7, height: 18)
+                .offset(y: bodySize * 0.62)
+                .blur(radius: 6)
+
+            // Sparkles when delighted
+            if mood == .delighted {
+                ForEach(0..<5, id: \.self) { i in
+                    Image(systemName: "sparkle")
+                        .font(.system(size: [14, 10, 12, 9, 11][i]))
+                        .foregroundStyle(accent)
+                        .offset(sparkleOffsets[i])
+                        .opacity(twinkle ? 1 : 0.3)
+                        .scaleEffect(twinkle ? 1 : 0.7)
+                        .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true).delay(Double(i) * 0.12), value: twinkle)
+                }
             }
-        }
-        .frame(width: 148, height: 148)
-        .clipped()
-        .padding(10)
-        .background(Color(red: 0.94, green: 0.89, blue: 0.76))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .shadow(color: Color(red: 1.0, green: 0.18, blue: 0.33).opacity(0.3), radius: 14, y: 0)
-        .shadow(color: .black.opacity(0.6), radius: 8, y: 6)
-        .task {
-            let opts = PHImageRequestOptions()
-            opts.deliveryMode = .opportunistic
-            opts.resizeMode = .fast
-            opts.isNetworkAccessAllowed = true
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: CGSize(width: 300, height: 300),
-                contentMode: .aspectFill,
-                options: opts
-            ) { img, _ in
-                DispatchQueue.main.async { self.image = img }
+
+            // The character
+            ZStack {
+                topper
+                    .offset(y: -bodySize * 0.54)
+
+                // Cat ears for mochi (behind the body so they tuck in)
+                if kind == .mochi {
+                    HStack(spacing: bodySize * 0.46) {
+                        Triangle().fill(gradient).frame(width: 36, height: 30)
+                        Triangle().fill(gradient).frame(width: 36, height: 30)
+                    }
+                    .offset(y: -bodySize * 0.48)
+                }
+
+                bodyBlob
+                    .overlay(
+                        Circle().fill(.white.opacity(0.18))
+                            .frame(width: bodySize * 0.42, height: bodySize * 0.30)
+                            .offset(x: -bodySize * 0.18, y: -bodySize * 0.20)
+                            .blur(radius: 6)
+                    )
+                    .shadow(color: accent.opacity(0.4), radius: 18, y: 8)
+
+                // Blush cheeks
+                HStack(spacing: bodySize * 0.40) {
+                    cheek; cheek
+                }
+                .offset(y: bodySize * 0.09)
+
+                // Face
+                VStack(spacing: bodySize * 0.07) {
+                    HStack(spacing: bodySize * 0.16) { eye; eye }
+                    mouth
+                }
+                .offset(y: -bodySize * 0.02)
+
+                // Waving arm
+                Capsule()
+                    .fill(gradient)
+                    .frame(width: 18, height: 40)
+                    .rotationEffect(.degrees(waveAngle), anchor: .bottom)
+                    .offset(x: bodySize * 0.5, y: 4)
+                    .shadow(color: accent.opacity(0.3), radius: 6, y: 3)
             }
+            .scaleEffect(x: 1 + bob * 0.01, y: 1 - bob * 0.012, anchor: .bottom)
+            .offset(y: bob)
         }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) { bob = -10 }
+            twinkle = true
+        }
+        .task { await animateLoop() }
+    }
+
+    private var cheek: some View {
+        Ellipse().fill(accent.opacity(0.35)).frame(width: 20, height: 12)
+    }
+
+    private var eye: some View {
+        ZStack {
+            Capsule().fill(inkColor).frame(width: 15, height: eyeHeight)
+            Circle().fill(.white).frame(width: 5, height: 5)
+                .offset(x: 2.5, y: -eyeHeight * 0.22)
+        }
+        .scaleEffect(x: 1, y: eyeOpen, anchor: .center)
+    }
+
+    @ViewBuilder private var mouth: some View {
+        switch mood {
+        case .sleepy:
+            SmileArc(curve: 0.45)
+                .stroke(inkColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .frame(width: 24, height: 12)
+        case .happy:
+            SmileArc(curve: 0.85)
+                .stroke(inkColor, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+                .frame(width: 30, height: 16)
+        case .delighted:
+            OpenSmile()
+                .fill(inkColor)
+                .frame(width: 30, height: 20)
+        }
+    }
+
+    // MARK: toppers
+
+    // Foldy — a little ticking clock, a nod to "Timefold."
+    private var clockTopknot: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Circle().fill(Theme.cream).frame(width: 22, height: 22)
+                    .overlay(Circle().stroke(Theme.orange, lineWidth: 2))
+                Capsule().fill(Theme.pink).frame(width: 2, height: 7).offset(y: -3)
+                Capsule().fill(Theme.pink).frame(width: 2, height: 5)
+                    .rotationEffect(.degrees(80)).offset(x: 2, y: 0)
+            }
+            Capsule().fill(Theme.orange).frame(width: 3, height: 12)
+        }
+    }
+
+    // Pip — a sprouting leaf.
+    private var sproutTopper: some View {
+        VStack(spacing: -1) {
+            ZStack {
+                Ellipse().fill(Color(red: 0.42, green: 0.76, blue: 0.46))
+                    .frame(width: 15, height: 9).rotationEffect(.degrees(-38)).offset(x: -5)
+                Ellipse().fill(Color(red: 0.48, green: 0.80, blue: 0.50))
+                    .frame(width: 15, height: 9).rotationEffect(.degrees(38)).offset(x: 5)
+            }
+            Capsule().fill(Color(red: 0.45, green: 0.70, blue: 0.42)).frame(width: 3, height: 11)
+        }
+    }
+
+    // Luna — a star on a wand.
+    private var starTopper: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "star.fill")
+                .font(.system(size: 16))
+                .foregroundStyle(Theme.cream)
+                .shadow(color: .white.opacity(0.8), radius: 4)
+            Capsule().fill(Color.white.opacity(0.85)).frame(width: 3, height: 9)
+        }
+    }
+
+    // Ember — a flame tuft.
+    private var flameTopper: some View {
+        Image(systemName: "flame.fill")
+            .font(.system(size: 22))
+            .foregroundStyle(LinearGradient(colors: [Theme.orange, Theme.pink],
+                                            startPoint: .bottom, endPoint: .top))
+    }
+
+    private func animateLoop() async {
+        // Wave hello a few times
+        for _ in 0..<3 {
+            withAnimation(.easeInOut(duration: 0.22)) { waveAngle = 24 }
+            try? await Task.sleep(nanoseconds: 230_000_000)
+            withAnimation(.easeInOut(duration: 0.22)) { waveAngle = -4 }
+            try? await Task.sleep(nanoseconds: 230_000_000)
+        }
+        withAnimation(.easeInOut(duration: 0.3)) { waveAngle = 0 }
+
+        // Idle blinking
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: UInt64.random(in: 2_200_000_000...4_200_000_000))
+            withAnimation(.easeInOut(duration: 0.08)) { eyeOpen = 0.12 }
+            try? await Task.sleep(nanoseconds: 110_000_000)
+            withAnimation(.easeInOut(duration: 0.10)) { eyeOpen = 1 }
+        }
+    }
+}
+
+private struct SmileArc: Shape {
+    var curve: CGFloat
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: 0))
+        p.addQuadCurve(to: CGPoint(x: rect.width, y: 0),
+                       control: CGPoint(x: rect.width / 2, y: rect.height * 2 * curve))
+        return p
+    }
+}
+
+private struct OpenSmile: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: 0))
+        p.addLine(to: CGPoint(x: rect.width, y: 0))
+        p.addQuadCurve(to: CGPoint(x: 0, y: 0),
+                       control: CGPoint(x: rect.width / 2, y: rect.height * 2))
+        p.closeSubpath()
+        return p
+    }
+}
+
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+// MARK: - Speech bubble
+
+private struct SpeechBubbleView: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 17, weight: .bold, design: .rounded))
+            .foregroundStyle(Color(red: 0.30, green: 0.20, blue: 0.24))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 11)
+            .background(
+                BubbleShape()
+                    .fill(.white)
+                    .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+            )
+    }
+}
+
+private struct BubbleShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let bodyRect = CGRect(x: 0, y: 0, width: rect.width, height: max(0, rect.height - 8))
+        let r = min(bodyRect.height / 2, 18)
+        var p = Path(roundedRect: bodyRect, cornerRadius: r)
+        let cx = rect.width / 2
+        var tail = Path()
+        tail.move(to: CGPoint(x: cx - 9, y: bodyRect.maxY - 2))
+        tail.addLine(to: CGPoint(x: cx, y: rect.maxY))
+        tail.addLine(to: CGPoint(x: cx + 9, y: bodyRect.maxY - 2))
+        tail.closeSubpath()
+        p.addPath(tail)
+        return p
     }
 }
 

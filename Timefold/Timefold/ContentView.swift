@@ -365,8 +365,17 @@ struct ContentView: View {
             Text("This action cannot be undone.")
         }
         .onChange(of: model.state) { newState in
-            if case .loaded = newState, shouldShowReveal() {
-                showingReveal = true
+            switch newState {
+            case .loaded:
+                if shouldShowReveal() {
+                    showingReveal = true
+                } else {
+                    promptNotificationsIfNeeded()
+                }
+            case .empty:
+                promptNotificationsIfNeeded()
+            default:
+                break
             }
         }
         .overlay {
@@ -376,11 +385,25 @@ struct ContentView: View {
                     withAnimation(.easeInOut(duration: 0.55)) {
                         showingReveal = false
                     }
+                    // First launch only: once the reveal has landed, ask about
+                    // the daily reminder — after the moment, never during it.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                        promptNotificationsIfNeeded()
+                    }
                 }
                 .ignoresSafeArea()
                 .transition(.opacity)
             }
         }
+    }
+
+    /// One-shot, first-session notification ask. If granted, the daily
+    /// reminder turns itself on with sensible defaults (9 AM, 3+ photos) —
+    /// permission without a scheduled reminder would be a no-op.
+    private func promptNotificationsIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: "didPromptForNotifications") else { return }
+        UserDefaults.standard.set(true, forKey: "didPromptForNotifications")
+        notificationManager.promptInitialPermission()
     }
 
     private func shouldShowReveal() -> Bool {
@@ -1752,6 +1775,18 @@ class NotificationManager: ObservableObject {
                     self.scheduleNotificationCheck()
                 } else {
                     self.isEnabled = false
+                }
+            }
+        }
+    }
+
+    /// First-launch ask: request the system permission and, if granted,
+    /// switch the daily reminder on (its didSet persists and schedules).
+    func promptInitialPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            DispatchQueue.main.async {
+                if granted {
+                    self.isEnabled = true
                 }
             }
         }

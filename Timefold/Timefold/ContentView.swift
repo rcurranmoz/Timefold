@@ -626,24 +626,18 @@ private struct PermissionView: View {
 // MARK: - Shared warm ornaments
 
 /// A soft radial "sun" hanging in the sky behind hero content.
-/// GeometryReader keeps the oversized glow from inflating the parent's
-/// layout — a 520pt child on a 402pt screen once pushed every sibling
-/// off-center.
+/// A plain RadialGradient fills whatever space exists: no oversized child
+/// to inflate the layout, no GeometryReader whose zero-size first pass
+/// once made the glow slide in from the corner on cold launch.
 private struct SunGlow: View {
     var body: some View {
-        GeometryReader { geo in
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Color.white.opacity(Theme.isNightSky() ? 0.14 : 0.55), .clear],
-                        center: .center, startRadius: 10, endRadius: 260
-                    )
-                )
-                .frame(width: 520, height: 520)
-                .position(x: geo.size.width / 2, y: geo.size.height * 0.34)
-        }
-        .allowsHitTesting(false)
+        RadialGradient(
+            colors: [Color.white.opacity(Theme.isNightSky() ? 0.14 : 0.55), .clear],
+            center: UnitPoint(x: 0.5, y: 0.34),
+            startRadius: 10, endRadius: 260
+        )
         .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 }
 
@@ -688,6 +682,8 @@ private struct BrandedLoadingView: View {
         [Theme.orange, Theme.pink],
     ]
 
+    @State private var ready = false
+
     var body: some View {
         ZStack {
             Theme.sky().ignoresSafeArea()
@@ -695,7 +691,8 @@ private struct BrandedLoadingView: View {
 
             VStack(spacing: 26) {
                 // A held stack of polaroids, breathing apart — the hand the
-                // reveal is about to deal.
+                // reveal is about to deal. The fan starts at its mid pose so
+                // a sub-second glimpse still looks composed.
                 ZStack {
                     ForEach(0..<3, id: \.self) { i in
                         let t = Double(i - 1)
@@ -703,8 +700,8 @@ private struct BrandedLoadingView: View {
                             LinearGradient(colors: windows[i],
                                            startPoint: .topLeading, endPoint: .bottomTrailing)
                         }
-                        .rotationEffect(.degrees(t * (breathe ? 10 : 5)), anchor: .bottom)
-                        .offset(x: t * (breathe ? 14 : 7), y: abs(t) * 3)
+                        .rotationEffect(.degrees(t * (breathe ? 10 : 7.5)), anchor: .bottom)
+                        .offset(x: t * (breathe ? 14 : 10.5), y: abs(t) * 3)
                         .animation(
                             .easeInOut(duration: 1.5).repeatForever(autoreverses: true).delay(Double(i) * 0.08),
                             value: breathe
@@ -733,8 +730,17 @@ private struct BrandedLoadingView: View {
                     .opacity(pulse ? 1 : 0.45)
                     .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
             }
+            // A deliberate quick fade-in: catching this screen for 200ms now
+            // reads as intent, not as half-finished layout.
+            .opacity(ready ? 1 : 0)
+            .scaleEffect(ready ? 1 : 0.985)
         }
-        .onAppear {
+        .task {
+            withAnimation(.easeOut(duration: 0.22)) { ready = true }
+            // Let the first layout pass fully settle before the repeat-
+            // forever animations begin, so they can't capture initial
+            // positions mid-flight.
+            try? await Task.sleep(nanoseconds: 250_000_000)
             breathe = true
             pulse = true
         }

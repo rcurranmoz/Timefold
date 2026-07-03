@@ -2171,43 +2171,48 @@ struct DatePickerView: View {
     @Binding var selectedDate: Date
     let onDateSelected: () -> Void
     @Environment(\.dismiss) private var dismiss
-    
+
+    /// The calendar edits a draft; the real date only commits when a day is
+    /// tapped. Swiping the sheet away can no longer change the masthead
+    /// date without loading its photos.
+    @State private var draft: Date
+
+    init(selectedDate: Binding<Date>, onDateSelected: @escaping () -> Void) {
+        self._selectedDate = selectedDate
+        self.onDateSelected = onDateSelected
+        // Seed the draft up front — assigning it in onAppear tripped
+        // onChange immediately and self-dismissed the sheet.
+        self._draft = State(initialValue: selectedDate.wrappedValue)
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
+            VStack(spacing: 8) {
                 Text("Jump to a date")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .padding(.top, 32)
-                
-                Text("See photos from this day in past years")
-                    .font(.subheadline)
+                    .font(.timefoldSerif(24))
+                    .padding(.top, 20)
+
+                Text("Tap a day to open it")
+                    .font(.timefoldRounded(13, weight: .medium))
                     .foregroundStyle(.secondary)
-                
+
                 DatePicker(
                     "Select Date",
-                    selection: $selectedDate,
+                    selection: $draft,
                     in: ...Date(),   // the future has no memories yet
                     displayedComponents: [.date]
                 )
                 .datePickerStyle(.graphical)
-                .padding()
-                
-                Spacer()
-                
-                Button {
+                .padding(.horizontal)
+                .onChange(of: draft) {
+                    // Tap = commit: load immediately, no confirm step.
+                    // Same-day taps are a no-op.
+                    guard !Calendar.current.isDate(draft, inSameDayAs: selectedDate) else { return }
+                    selectedDate = draft
                     onDateSelected()
-                } label: {
-                    Text("Show Memories")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Theme.brandGradient)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                .padding(.horizontal, 32)
-                .padding(.bottom, 32)
+
+                Spacer(minLength: 0)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

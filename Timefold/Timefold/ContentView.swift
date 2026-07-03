@@ -195,16 +195,22 @@ struct ContentView: View {
                         model.requestPermission()
                     }
 
+                case .denied:
+                    DeniedAccessView()
+
                 case .loading:
                     BrandedLoadingView()
 
                 case .empty:
-                    EmptyMemoriesView(date: selectedDate)
+                    EmptyMemoriesView(date: selectedDate) {
+                        showingDatePicker = true
+                    }
 
                 case .loaded(let assets):
                     MemoriesGridView(
                         assets: assets,
                         isRevealActive: showingReveal,
+                        onRefresh: { await model.reloadQuietly(for: selectedDate) },
                         isSelecting: $isSelecting,
                         selectedAssets: $selectedAssets,
                         showingDeleteConfirmation: $showingDeleteConfirmation
@@ -256,6 +262,7 @@ struct ContentView: View {
                 model.loadMemoriesFor(date: selectedDate)
                 showingDatePicker = false
             })
+            .presentationDetents([.large, .medium])
         }
         .confirmationDialog(
             "Delete \(selectedAssets.count) \(selectedAssets.count == 1 ? "item" : "items")?",
@@ -328,7 +335,7 @@ struct ContentView: View {
     }
 
     /// Quiet 40pt utility glyph for the brand bar.
-    private func mastheadGlyph(_ systemName: String, tint: Color = .secondary, action: @escaping () -> Void) -> some View {
+    private func mastheadGlyph(_ systemName: String, label: String, tint: Color = .secondary, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 17, weight: .medium))
@@ -337,6 +344,7 @@ struct ContentView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     /// Editorial masthead: a tiny nameplate flanked by quiet utilities,
@@ -351,23 +359,23 @@ struct ContentView: View {
                     BrandWordmark(isCompact: true)
 
                     HStack {
-                        mastheadGlyph("gearshape") { showingSettings = true }
+                        mastheadGlyph("gearshape", label: "Settings") { showingSettings = true }
                         Spacer()
                         if case .loaded = model.state {
                             if isSelecting {
-                                mastheadGlyph("trash",
+                                mastheadGlyph("trash", label: "Delete selected",
                                               tint: selectedAssets.isEmpty ? Color.secondary.opacity(0.5) : .red) {
                                     showingDeleteConfirmation = true
                                 }
                                 .disabled(selectedAssets.isEmpty)
-                                mastheadGlyph("xmark") {
+                                mastheadGlyph("xmark", label: "Cancel selection") {
                                     withAnimation {
                                         isSelecting = false
                                         selectedAssets.removeAll()
                                     }
                                 }
                             } else {
-                                mastheadGlyph("checkmark.circle") {
+                                mastheadGlyph("checkmark.circle", label: "Select photos") {
                                     withAnimation { isSelecting = true }
                                 }
                             }
@@ -391,6 +399,8 @@ struct ContentView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Change date")
+                    .accessibilityValue(formatDateString(selectedDate))
 
                     if !Calendar.current.isDateInToday(selectedDate) {
                         Button {
@@ -479,8 +489,8 @@ struct ContentView: View {
                         // Clear selection and exit selection mode
                         selectedAssets.removeAll()
                         isSelecting = false
-                        // Reload to update the view
-                        model.loadMemoriesFor(date: selectedDate)
+                        // Update in place — no loading flash for a delete
+                        model.loadMemoriesFor(date: selectedDate, quietly: true)
                     }
                 } else if let error = error {
                     print("Error deleting photos: \(error.localizedDescription)")
@@ -616,18 +626,24 @@ private struct PermissionView: View {
 // MARK: - Shared warm ornaments
 
 /// A soft radial "sun" hanging in the sky behind hero content.
+/// GeometryReader keeps the oversized glow from inflating the parent's
+/// layout — a 520pt child on a 402pt screen once pushed every sibling
+/// off-center.
 private struct SunGlow: View {
     var body: some View {
-        Circle()
-            .fill(
-                RadialGradient(
-                    colors: [Color.white.opacity(Theme.isNightSky() ? 0.14 : 0.55), .clear],
-                    center: .center, startRadius: 10, endRadius: 260
+        GeometryReader { geo in
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.white.opacity(Theme.isNightSky() ? 0.14 : 0.55), .clear],
+                        center: .center, startRadius: 10, endRadius: 260
+                    )
                 )
-            )
-            .frame(width: 520, height: 520)
-            .offset(y: -140)
-            .allowsHitTesting(false)
+                .frame(width: 520, height: 520)
+                .position(x: geo.size.width / 2, y: geo.size.height * 0.34)
+        }
+        .allowsHitTesting(false)
+        .ignoresSafeArea()
     }
 }
 
@@ -727,6 +743,7 @@ private struct BrandedLoadingView: View {
 
 private struct EmptyMemoriesView: View {
     let date: Date
+    var onExplore: (() -> Void)? = nil
     @State private var appeared = false
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
     @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
@@ -755,6 +772,19 @@ private struct EmptyMemoriesView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 44)
                     .padding(.top, 6)
+
+                if let onExplore {
+                    Button(action: onExplore) {
+                        Label("Explore another day", systemImage: "calendar")
+                            .font(.timefoldRounded(14, weight: .semibold))
+                            .foregroundStyle(Theme.skyInk())
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(Theme.skyInk().opacity(0.08), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 18)
+                }
             }
             .opacity(appeared ? 1 : 0)
             .offset(y: appeared ? 0 : 16)
@@ -764,9 +794,54 @@ private struct EmptyMemoriesView: View {
     }
 }
 
+/// Photo access was refused — don't strand the user in an error string;
+/// walk them straight to the switch that fixes it.
+private struct DeniedAccessView: View {
+    @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+
+    var body: some View {
+        ZStack {
+            Theme.sky().ignoresSafeArea()
+            SunGlow()
+            VStack(spacing: 10) {
+                TimeSprite(mood: .sleepy, kind: MascotKind(rawValue: mascotRaw) ?? .foldy)
+                    .scaleEffect(0.62)
+                    .frame(height: 150)
+                Text("No peeking allowed")
+                    .font(.timefoldSerif(32))
+                    .foregroundStyle(Theme.skyInk())
+                Text("TIMEFOLD CAN'T SEE YOUR PHOTOS")
+                    .metaLabel(11, color: Theme.skyInkSoft())
+                Text("Everything stays on your device — Timefold just needs permission to show your own memories back to you.")
+                    .font(.timefoldRounded(14, weight: .medium))
+                    .foregroundStyle(Theme.skyInkSoft().opacity(0.9))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 44)
+                    .padding(.top, 6)
+
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text("Open Settings")
+                        .font(.timefoldRounded(16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 12)
+                        .background(Theme.brandGradient, in: Capsule())
+                        .shadow(color: Theme.pink.opacity(0.3), radius: 12, y: 6)
+                }
+                .padding(.top, 20)
+            }
+        }
+    }
+}
+
 private struct MemoriesGridView: View {
     let assets: [PHAsset]
     var isRevealActive: Bool = false
+    var onRefresh: (() async -> Void)? = nil
     @Binding var isSelecting: Bool
     @Binding var selectedAssets: Set<String>
     @Binding var showingDeleteConfirmation: Bool
@@ -882,26 +957,21 @@ private struct MemoriesGridView: View {
                                     )
                                 }
                             }
-                            .background(
-                                GeometryReader { itemGeo in
-                                    Color.clear
-                                        .preference(
-                                            key: ScrollOffsetPreferenceKey.self,
-                                            value: itemGeo.frame(in: .named("scroll")).minY
-                                        )
-                                        .onAppear { updateYearIfVisible(itemGeo: itemGeo, asset: asset) }
-                                        .onChange(of: itemGeo.frame(in: .named("scroll")).minY) { _ in
-                                            updateYearIfVisible(itemGeo: itemGeo, asset: asset)
-                                        }
-                                }
-                            )
                         }
                     }
                 }
                 .padding(.horizontal, 0)
             }
-            .coordinateSpace(name: "scroll")
+            // One scroll observer + row math replaces a GeometryReader,
+            // preference write, and onChange per visible cell per frame.
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            } action: { old, new in
+                guard abs(new - old) > 2 else { return }
+                updateYear(forOffset: new, cellSize: cell)
+            }
             .scrollIndicators(.hidden)
+            .refreshable { await onRefresh?() }
             .ignoresSafeArea(edges: .bottom)
             .onAppear {
                 if !isRevealActive { entered = true }
@@ -912,13 +982,11 @@ private struct MemoriesGridView: View {
         }
     }
     
-    private func updateYearIfVisible(itemGeo: GeometryProxy, asset: PHAsset) {
-        let frame = itemGeo.frame(in: .named("scroll"))
-        
-        // Only check items near the top of the screen (between 80-180 points from top)
-        guard frame.minY > 80 && frame.minY < 180 else { return }
-        
-        guard let assetDate = asset.creationDate else { return }
+    private func updateYear(forOffset offset: CGFloat, cellSize: CGFloat) {
+        // Which row is passing ~130pt below the masthead right now?
+        let row = max(0, Int((offset + 130) / (cellSize + spacing)))
+        let index = min(row * 3, assets.count - 1)
+        guard index >= 0, let assetDate = assets[index].creationDate else { return }
         let year = Calendar.current.component(.year, from: assetDate)
         
         if currentYear != year {
@@ -1100,10 +1168,16 @@ private struct GridCellView: View {
     }
 }
 
+/// Shared caching manager: PhotoKit keeps recently decoded grid thumbnails
+/// warm across scrolls instead of re-decoding on every pass.
+private let thumbnailManager = PHCachingImageManager()
+
 private struct AssetThumbnailView: View {
     let asset: PHAsset
-    var targetSize: CGSize = CGSize(width: 300, height: 300)
+    /// In pixels. Default covers a 3-column grid cell on a 3x display.
+    var targetSize: CGSize = CGSize(width: 420, height: 420)
     @State private var image: UIImage?
+    @State private var requestID: PHImageRequestID?
 
     var body: some View {
         ZStack {
@@ -1118,23 +1192,32 @@ private struct AssetThumbnailView: View {
         }
         .animation(.easeOut(duration: 0.35), value: image == nil)
         .task {
-            await load()
+            load()
+        }
+        .onDisappear {
+            // Fast flicks queue dozens of requests; cancel work for cells
+            // that scrolled away before their image arrived.
+            if image == nil, let requestID {
+                thumbnailManager.cancelImageRequest(requestID)
+            }
         }
     }
 
-    private func load() async {
+    private func load() {
         let opts = PHImageRequestOptions()
         opts.deliveryMode = .opportunistic
         opts.resizeMode = .fast
         opts.isNetworkAccessAllowed = true
 
-        PHImageManager.default().requestImage(
+        requestID = thumbnailManager.requestImage(
             for: asset,
             targetSize: targetSize,
             contentMode: .aspectFill,
             options: opts
         ) { img, _ in
-            DispatchQueue.main.async { self.image = img }
+            if let img {
+                DispatchQueue.main.async { self.image = img }
+            }
         }
     }
 }
@@ -1152,7 +1235,6 @@ private struct MemoryPagerView: View {
     @State private var isPreparingShare = false
     @State private var shareItem: ShareItem?
     @State private var loadedImages: [String: UIImage] = [:]
-    @State private var storyImages: [String: UIImage] = [:]
     @State private var dragOffset: CGFloat = 0
     @State private var opacity: Double = 1.0
     @State private var isZoomed = false
@@ -1166,11 +1248,6 @@ private struct MemoryPagerView: View {
     private var currentImage: UIImage? {
         guard let asset = assets[safe: selection] else { return nil }
         return loadedImages[asset.localIdentifier]
-    }
-    
-    private var currentStoryImage: UIImage? {
-        guard let asset = assets[safe: selection] else { return nil }
-        return storyImages[asset.localIdentifier]
     }
     
     private var currentAsset: PHAsset? {
@@ -1187,25 +1264,17 @@ private struct MemoryPagerView: View {
 
             TabView(selection: $selection) {
                 ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
-                    PagedPhotoView(
-                        asset: asset,
-                        onImageReady: { img in
-                            loadedImages[asset.localIdentifier] = img
-                        },
-                        onStoryImageReady: { storyImg in
-                            storyImages[asset.localIdentifier] = storyImg
-                        },
-                        dragOffset: dragOffset,
-                        onZoomChanged: { isZoomed = $0 }
-                    )
-                    .tag(index)
+                    pagerPage(index: index, asset: asset)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: currentAssetIsVideo ? .never : .automatic))
             .indexViewStyle(.page(backgroundDisplayMode: .always))
             .offset(y: dragOffset)
             .opacity(opacity)
-            .onChange(of: selection) { isZoomed = false }
+            .onChange(of: selection) {
+                isZoomed = false
+                pruneImageCache()
+            }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 20)
                     .onChanged { value in
@@ -1340,14 +1409,10 @@ private struct MemoryPagerView: View {
                             isPreparingShare = false
                         }
                     } else {
-                        // For photos, prepare the story image
-                        if let storyImage = currentStoryImage {
-                            await MainActor.run {
-                                shareItem = .image(storyImage)
-                                isPreparingShare = false
-                            }
-                        } else if let currentImage, let asset = currentAsset {
-                            // Generate story image if not ready
+                        // Photos: render the branded story frame on demand —
+                        // eagerly rendering one per swiped page burned CPU
+                        // and memory for shares that never happened.
+                        if let currentImage, let asset = currentAsset {
                             let storyImage = await Task.detached(priority: .userInitiated) {
                                 return createStoryImage(from: currentImage, asset: asset) ?? currentImage
                             }.value
@@ -1379,7 +1444,31 @@ private struct MemoryPagerView: View {
         }
     }
     
-    private func createStoryImage(from image: UIImage, asset: PHAsset) -> UIImage? {
+    /// One page of the pager, factored out to keep the type-checker happy.
+    private func pagerPage(index: Int, asset: PHAsset) -> some View {
+        PagedPhotoView(
+            asset: asset,
+            // Full-res bitmaps are ~20MB each; only the current page and its
+            // neighbors keep theirs in memory.
+            isNearSelection: abs(index - selection) <= 2,
+            onImageReady: { img in
+                loadedImages[asset.localIdentifier] = img
+            },
+            dragOffset: dragOffset,
+            onZoomChanged: { isZoomed = $0 }
+        )
+        .tag(index)
+    }
+
+    /// Drop cached full-res images for pages far from the current one.
+    private func pruneImageCache() {
+        let keep = Set(((selection - 2)...(selection + 2)).compactMap {
+            assets[safe: $0]?.localIdentifier
+        })
+        loadedImages = loadedImages.filter { keep.contains($0.key) }
+    }
+
+    nonisolated private func createStoryImage(from image: UIImage, asset: PHAsset) -> UIImage? {
         makeStoryImage(from: image, asset: asset, canvasSize: CGSize(width: 1080, height: 1920))
     }
 
@@ -1436,8 +1525,8 @@ private struct MemoryPagerView: View {
 
 private struct PagedPhotoView: View {
     let asset: PHAsset
+    var isNearSelection: Bool = true
     let onImageReady: (UIImage?) -> Void
-    let onStoryImageReady: (UIImage?) -> Void
     let dragOffset: CGFloat
     var onZoomChanged: (Bool) -> Void = { _ in }
 
@@ -1561,8 +1650,14 @@ private struct PagedPhotoView: View {
             .frame(width: geo.size.width, height: geo.size.height)
             .background(ambientBackdrop)
         }
-        .task {
-            await loadFull()
+        .task(id: isNearSelection) {
+            if isNearSelection {
+                if image == nil { await loadFull() }
+            } else if image != nil {
+                // TabView keeps far pages alive — don't let them each pin a
+                // full-resolution bitmap.
+                image = nil
+            }
         }
         .onDisappear {
             player?.pause()
@@ -1651,28 +1746,26 @@ private struct PagedPhotoView: View {
                 self.image = img
                 if let img {
                     self.onImageReady(img)
-                    Task.detached(priority: .utility) {
-                        let storyImage = makeStoryImage(from: img, asset: self.asset, canvasSize: CGSize(width: 720, height: 1280))
-                        await MainActor.run { self.onStoryImageReady(storyImage) }
-                    }
                 }
             }
         }
     }
-    
+
 }
 
 final class MemoriesViewModel: ObservableObject {
     enum State: Equatable {
         case needsPermission
+        case denied
         case loading
         case empty
         case loaded([PHAsset])
         case error(String)
-        
+
         static func == (lhs: State, rhs: State) -> Bool {
             switch (lhs, rhs) {
             case (.needsPermission, .needsPermission),
+                 (.denied, .denied),
                  (.loading, .loading),
                  (.empty, .empty):
                 return true
@@ -1713,7 +1806,7 @@ final class MemoriesViewModel: ObservableObject {
         case .notDetermined:
             state = .needsPermission
         case .denied, .restricted:
-            state = .error("Photo access is denied. Enable it in Settings → Privacy & Security → Photos.")
+            state = .denied
         @unknown default:
             state = .error("Unknown authorization status.")
         }
@@ -1736,29 +1829,68 @@ final class MemoriesViewModel: ObservableObject {
         }
         let dayRolled = !Calendar.current.isDate(last, inSameDayAs: Date())
         guard dayRolled || Date().timeIntervalSince(last) > maxAge else { return }
-        loadMemoriesFor(date: date)
+        // Day rollover deserves the full branded moment (and a new reveal);
+        // a mere staleness pass shouldn't blow the UI away.
+        loadMemoriesFor(date: date, quietly: !dayRolled)
     }
 
-    func loadMemoriesFor(date: Date) {
+    /// quietly: update data in place without flashing the branded loading
+    /// screen — for deletes, pull-to-refresh, and stale-data refreshes.
+    func loadMemoriesFor(date: Date, quietly: Bool = false) {
         lastLoadAt = Date()
-        state = .loading
+        if !quietly { state = .loading }
         Task.detached(priority: .userInitiated) { [weak self] in
             let assets = Self.fetchMemories(for: date)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.state = assets.isEmpty ? .empty : .loaded(assets)
-                if !assets.isEmpty {
-                    SharedMemoriesManager.shared.saveMemoryCount(assets.count)
-                    if let randomAsset = assets.randomElement() {
-                        SharedMemoriesManager.shared.saveWidgetThumbnail(from: randomAsset)
-                    }
-                    WidgetCenter.shared.reloadAllTimelines()
-                }
+            }
+            if !assets.isEmpty {
+                Self.updateWidget(count: assets.count, sampleFrom: assets)
             }
         }
     }
 
-    static func fetchMemories(for date: Date) -> [PHAsset] {
+    /// Async twin of the quiet reload, for `.refreshable`.
+    @MainActor
+    func reloadQuietly(for date: Date) async {
+        lastLoadAt = Date()
+        let assets = await Task.detached(priority: .userInitiated) {
+            Self.fetchMemories(for: date)
+        }.value
+        state = assets.isEmpty ? .empty : .loaded(assets)
+        if !assets.isEmpty {
+            let snapshot = assets
+            Task.detached(priority: .utility) {
+                Self.updateWidget(count: snapshot.count, sampleFrom: snapshot)
+            }
+        }
+    }
+
+    /// Widget upkeep, entirely off the main thread. The thumbnail render
+    /// used to be a synchronous PhotoKit request on the main actor on every
+    /// launch — a guaranteed hitch. Now: count is always cheap to write; the
+    /// thumbnail regenerates at most once per day; timelines reload only
+    /// when something actually changed.
+    nonisolated private static func updateWidget(count: Int, sampleFrom assets: [PHAsset]) {
+        let ud = UserDefaults.standard
+        let lastCount = ud.integer(forKey: "widgetLastCount")
+        let today = Calendar.current.startOfDay(for: Date())
+        let lastThumbDay = ud.object(forKey: "widgetThumbDay") as? Date
+
+        let needsThumb = lastThumbDay.map { !Calendar.current.isDate($0, inSameDayAs: today) } ?? true
+        guard needsThumb || count != lastCount else { return }
+
+        SharedMemoriesManager.shared.saveMemoryCount(count)
+        if needsThumb, let sample = assets.randomElement() {
+            SharedMemoriesManager.shared.saveWidgetThumbnail(from: sample)
+            ud.set(today, forKey: "widgetThumbDay")
+        }
+        ud.set(count, forKey: "widgetLastCount")
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    nonisolated static func fetchMemories(for date: Date) -> [PHAsset] {
         let calendar = Calendar.current
         let day = calendar.component(.day, from: date)
         let month = calendar.component(.month, from: date)
@@ -1853,14 +1985,6 @@ private struct VideoActivityView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
 }
 
-// MARK: - Scroll Tracking
-private struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 // MARK: - Notification Manager
 class NotificationManager: ObservableObject {
     @Published var isEnabled: Bool {
@@ -1949,6 +2073,9 @@ class NotificationManager: ObservableObject {
             let calendar = Calendar.current
             let now = Date()
             var requests: [UNNotificationRequest] = []
+            // One cheap query bounds the 30-day scan to years that can
+            // actually contain photos, instead of probing back to 1970.
+            let oldestYear = NotificationManager.oldestPhotoYear()
 
             for daysAhead in 1...30 {
                 guard let targetDate = calendar.date(byAdding: .day, value: daysAhead, to: now) else { continue }
@@ -1956,7 +2083,7 @@ class NotificationManager: ObservableObject {
                 let day = calendar.component(.day, from: targetDate)
                 let year = calendar.component(.year, from: targetDate)
 
-                let count = NotificationManager.countMemories(month: month, day: day, beforeYear: year)
+                let count = NotificationManager.countMemories(month: month, day: day, fromYear: oldestYear, beforeYear: year)
                 guard count >= minPhotos else { continue }
 
                 var trigger = DateComponents()
@@ -1987,10 +2114,10 @@ class NotificationManager: ObservableObject {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["dailyMemoriesCheck"])
     }
 
-    private static func countMemories(month: Int, day: Int, beforeYear: Int) -> Int {
+    nonisolated private static func countMemories(month: Int, day: Int, fromYear: Int, beforeYear: Int) -> Int {
         let calendar = Calendar.current
         var datePredicates: [NSPredicate] = []
-        for year in 1970..<beforeYear {
+        for year in min(fromYear, beforeYear)..<beforeYear {
             var comps = DateComponents()
             comps.year = year; comps.month = month; comps.day = day
             comps.hour = 0; comps.minute = 0; comps.second = 0
@@ -2011,7 +2138,17 @@ class NotificationManager: ObservableObject {
         return PHAsset.fetchAssets(with: opts).count
     }
 
-    private static let notificationMessages: [(String, String)] = [
+    /// Year of the oldest photo in the library (fallback 2000).
+    nonisolated fileprivate static func oldestPhotoYear() -> Int {
+        let opts = PHFetchOptions()
+        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
+        opts.fetchLimit = 1
+        guard let first = PHAsset.fetchAssets(with: .image, options: opts).firstObject,
+              let d = first.creationDate else { return 2000 }
+        return Calendar.current.component(.year, from: d)
+    }
+
+    nonisolated private static let notificationMessages: [(String, String)] = [
         ("Your memories are ready", "Photos from this day in past years"),
         ("Time to look back", "See what you were up to today"),
         ("Memories from this day", "Tap to revisit the past"),
@@ -2044,6 +2181,7 @@ struct DatePickerView: View {
                 DatePicker(
                     "Select Date",
                     selection: $selectedDate,
+                    in: ...Date(),   // the future has no memories yet
                     displayedComponents: [.date]
                 )
                 .datePickerStyle(.graphical)
@@ -2530,6 +2668,7 @@ private struct DailyRevealView: View {
 
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
     @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var kind: MascotKind { MascotKind(rawValue: mascotRaw) ?? .foldy }
     private var hat: HatKind { HatKind(rawValue: hatRaw) ?? .none }
 
@@ -2673,10 +2812,26 @@ private struct DailyRevealView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { completeDismiss() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(headlineString) from \(metaString)")
+        .accessibilityHint("Double tap to open your memories")
+        .accessibilityAddTraits(.isButton)
         .task { await runSequence() }
     }
 
     private func runSequence() async {
+        // Reduce Motion: land everything gently, skip the choreography.
+        if reduceMotion {
+            withAnimation(.easeIn(duration: 0.3)) {
+                showMeta = true; showHeadline = true
+                dealt = fanAssets.count
+                spriteUp = true; showBubble = true; showHint = true
+            }
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            completeDismiss()
+            return
+        }
+
         withAnimation(.easeOut(duration: 0.45)) { showMeta = true }
         try? await Task.sleep(nanoseconds: 150_000_000)
         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { showHeadline = true }
@@ -2900,6 +3055,7 @@ private struct TimeSprite: View {
             twinkle = true
         }
         .task { await animateLoop() }
+        .accessibilityHidden(true)  // decorative companion
     }
 
     private var cheek: some View {
@@ -3057,7 +3213,7 @@ extension Array {
 
 // MARK: - Shared Story Image Renderer
 
-private func makeStoryImage(from image: UIImage, asset: PHAsset, canvasSize: CGSize) -> UIImage? {
+nonisolated private func makeStoryImage(from image: UIImage, asset: PHAsset, canvasSize: CGSize) -> UIImage? {
     let scale = canvasSize.width / 1080.0
 
     let format = UIGraphicsImageRendererFormat()
@@ -3198,14 +3354,14 @@ private func makeStoryImage(from image: UIImage, asset: PHAsset, canvasSize: CGS
     }
 }
 
-private func storyFormattedDate(_ date: Date?) -> String {
+nonisolated private func storyFormattedDate(_ date: Date?) -> String {
     guard let date else { return "" }
     let formatter = DateFormatter()
     formatter.dateFormat = "MMMM d, yyyy"
     return formatter.string(from: date)
 }
 
-private func storyYearsAgo(_ date: Date?) -> String {
+nonisolated private func storyYearsAgo(_ date: Date?) -> String {
     guard let date else { return "" }
     let calendar = Calendar.current
     let now = Date()

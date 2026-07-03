@@ -336,7 +336,7 @@ struct ContentView: View {
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: Circle())
+                .background(.regularMaterial, in: Circle())
 
                 // Wordmark + date, centered in whatever gap the two
                 // button clusters leave over.
@@ -431,7 +431,7 @@ struct ContentView: View {
                         }
                     }
                 }
-                .glassEffect(.regular.interactive(), in: Capsule())
+                .background(.regularMaterial, in: Capsule())
             }
             .padding(.horizontal, 12)
             .padding(.top, 2)

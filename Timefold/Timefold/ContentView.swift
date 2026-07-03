@@ -165,7 +165,6 @@ extension View {
 struct ContentView: View {
     @StateObject private var model = MemoriesViewModel()
     @StateObject private var notificationManager = NotificationManager()
-    @State private var viewMode: ViewMode = .grid
     @State private var showingSettings = false
     @State private var showingDatePicker = false
     @State private var selectedDate = Date()
@@ -187,11 +186,6 @@ struct ContentView: View {
         }
     }
 
-    enum ViewMode {
-        case grid
-        case fullscreen
-    }
-
     var body: some View {
         NavigationStack {
             Group {
@@ -208,26 +202,13 @@ struct ContentView: View {
                     EmptyMemoriesView(date: selectedDate)
 
                 case .loaded(let assets):
-                    if viewMode == .grid {
-                        MemoriesGridView(
-                            assets: assets,
-                            isRevealActive: showingReveal,
-                            isGridViewMode: $viewMode,
-                            isSelecting: $isSelecting,
-                            selectedAssets: $selectedAssets,
-                            showingDeleteConfirmation: $showingDeleteConfirmation
-                        )
-                    } else {
-                        MemoryPagerView(
-                            assets: assets,
-                            startAsset: assets.first ?? assets[0],
-                            onDismiss: {
-                                withAnimation {
-                                    viewMode = .grid
-                                }
-                            }
-                        )
-                    }
+                    MemoriesGridView(
+                        assets: assets,
+                        isRevealActive: showingReveal,
+                        isSelecting: $isSelecting,
+                        selectedAssets: $selectedAssets,
+                        showingDeleteConfirmation: $showingDeleteConfirmation
+                    )
 
                 case .error(let message):
                     ContentUnavailableView(
@@ -323,119 +304,136 @@ struct ContentView: View {
         }
     }
 
+    /// Uppercased weekday plus a live summary of what's on screen.
+    private var mastheadMeta: String {
+        let f = DateFormatter(); f.dateFormat = "EEEE"
+        let weekday = f.string(from: selectedDate).uppercased()
+        switch model.state {
+        case .loaded(let assets):
+            if isSelecting {
+                return selectedAssets.isEmpty
+                    ? "SELECT MEMORIES TO DELETE"
+                    : "\(selectedAssets.count) SELECTED"
+            }
+            let mem = assets.count == 1 ? "1 MEMORY" : "\(assets.count) MEMORIES"
+            let years = Set(assets.compactMap { $0.creationDate }.map {
+                Calendar.current.component(.year, from: $0)
+            }).count
+            return years > 1 ? "\(weekday) · \(mem) · ACROSS \(years) YEARS" : "\(weekday) · \(mem)"
+        case .empty:
+            return "\(weekday) · NO MEMORIES THIS DAY"
+        default:
+            return weekday
+        }
+    }
+
+    /// Quiet 40pt utility glyph for the brand bar.
+    private func mastheadGlyph(_ systemName: String, tint: Color = .secondary, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 40, height: 40)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Editorial masthead: a tiny nameplate flanked by quiet utilities,
+    /// then the date as the hero — tap it to travel. Each day the grid
+    /// reads like that day's issue.
     @ViewBuilder
     private var floatingHeader: some View {
         if hasContent {
-            HStack(spacing: 12) {
-                Button {
-                    showingSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .background(.regularMaterial, in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                // Nameplate row
+                ZStack {
+                    BrandWordmark(isCompact: true)
 
-                // Wordmark + date, centered in whatever gap the two
-                // button clusters leave over.
-                VStack(spacing: isCompact ? 0.5 : 1) {
-                    BrandWordmark(isCompact: isCompact)
-                    HStack(spacing: isCompact ? 2 : 3) {
-                        Text(formatDateString(selectedDate))
-                            .font(.system(size: isCompact ? 9 : 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-
-                        if !Calendar.current.isDateInToday(selectedDate) {
-                            Button {
-                                selectedDate = Date()
-                                model.loadMemoriesFor(date: Date())
-                            } label: {
-                                Text("• Today")
-                                    .font(.system(size: isCompact ? 9 : 11, weight: .medium))
-                                    .foregroundStyle(.blue)
-                            }
-                        }
-                    }
-                }
-                .fixedSize()
-                .frame(maxWidth: .infinity)
-                .transition(.scale.combined(with: .opacity))
-                .animation(.spring(response: 0.4, dampingFraction: 0.7), value: model.state)
-
-                HStack(spacing: 0) {
-                    if viewMode == .grid, !isSelecting {
-                        Button {
-                            showingDatePicker = true
-                        } label: {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if case .loaded = model.state {
-                        if !isSelecting {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    if viewMode == .grid {
-                                        selectedAssets.removeAll()
-                                    }
-                                    viewMode = viewMode == .grid ? .fullscreen : .grid
-                                }
-                            } label: {
-                                Image(systemName: viewMode == .grid ? "square.fill.on.square.fill" : "square.grid.3x3.fill")
-                                    .font(.system(size: 17, weight: .medium))
-                                    .foregroundStyle(.primary)
-                                    .frame(width: 44, height: 44)
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        if viewMode == .grid {
+                    HStack {
+                        mastheadGlyph("gearshape") { showingSettings = true }
+                        Spacer()
+                        if case .loaded = model.state {
                             if isSelecting {
-                                Button("Cancel") {
+                                mastheadGlyph("trash",
+                                              tint: selectedAssets.isEmpty ? Color.secondary.opacity(0.5) : .red) {
+                                    showingDeleteConfirmation = true
+                                }
+                                .disabled(selectedAssets.isEmpty)
+                                mastheadGlyph("xmark") {
                                     withAnimation {
                                         isSelecting = false
                                         selectedAssets.removeAll()
                                     }
                                 }
-                                .padding(.horizontal, 12)
-                                .frame(height: 44)
-
-                                Button {
-                                    showingDeleteConfirmation = true
-                                } label: {
-                                    Text("Delete")
-                                        .foregroundStyle(selectedAssets.isEmpty ? Color.secondary : .red)
-                                }
-                                .disabled(selectedAssets.isEmpty)
-                                .padding(.horizontal, 12)
-                                .frame(height: 44)
                             } else {
-                                Button {
-                                    withAnimation {
-                                        isSelecting = true
-                                    }
-                                } label: {
-                                    Image(systemName: "checkmark.circle")
-                                        .font(.system(size: 17, weight: .medium))
-                                        .foregroundStyle(.primary)
-                                        .frame(width: 44, height: 44)
+                                mastheadGlyph("checkmark.circle") {
+                                    withAnimation { isSelecting = true }
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
                 }
-                .background(.regularMaterial, in: Capsule())
+
+                // The date is the calendar: tap to travel
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Button {
+                        showingDatePicker = true
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(formatDateString(selectedDate))
+                                .font(.timefoldSerif(32))
+                                .foregroundStyle(.primary)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if !Calendar.current.isDateInToday(selectedDate) {
+                        Button {
+                            selectedDate = Date()
+                            model.loadMemoriesFor(date: Date())
+                        } label: {
+                            Text("Today")
+                                .font(.timefoldRounded(12, weight: .semibold))
+                                .foregroundStyle(Theme.pink)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Theme.pink.opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Spacer()
+                }
+
+                Text(mastheadMeta)
+                    .font(.timefoldRounded(10))
+                    .kerning(1.6)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 3)
+                    .animation(.easeInOut(duration: 0.2), value: mastheadMeta)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 2)
-            .padding(.bottom, 6)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                // Content scrolls beneath; fade it out softly under the type.
+                Rectangle()
+                    .fill(.regularMaterial)
+                    .mask {
+                        LinearGradient(stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: 0.82),
+                            .init(color: .clear, location: 1),
+                        ], startPoint: .top, endPoint: .bottom)
+                    }
+                    .padding(.bottom, -16)
+                    .ignoresSafeArea(edges: .top)
+            }
         }
     }
 
@@ -524,9 +522,15 @@ private struct BrandWordmark: View {
                 .mask(glyphs)
                 .allowsHitTesting(false)
             }
-            .onAppear {
-                withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: false).delay(1.0)) {
-                    shimmer = true
+            .task {
+                // A rare glint, not a metronome: one pass shortly after
+                // appearing, then roughly every 25 seconds.
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                while !Task.isCancelled {
+                    withAnimation(.easeInOut(duration: 2.8)) { shimmer = true }
+                    try? await Task.sleep(nanoseconds: 2_900_000_000)
+                    shimmer = false  // snap back off-glyph, invisible at rest
+                    try? await Task.sleep(nanoseconds: 22_000_000_000)
                 }
             }
     }
@@ -763,7 +767,6 @@ private struct EmptyMemoriesView: View {
 private struct MemoriesGridView: View {
     let assets: [PHAsset]
     var isRevealActive: Bool = false
-    @Binding var isGridViewMode: ContentView.ViewMode
     @Binding var isSelecting: Bool
     @Binding var selectedAssets: Set<String>
     @Binding var showingDeleteConfirmation: Bool

@@ -23,12 +23,14 @@ Your photos stay yours.
 
 Timefold is now Latent.
 
-Same app, same photos, same privacy — a name that fits it better. A latent image is the one already captured on film, waiting to be developed. That's what's sitting in your library right now.
+Same app, same photos, same privacy — a name that fits it better. A latent image is the one already caught on the film, waiting to be developed. That is what is sitting in your library right now.
 
-- New name, new wordmark, new aperture mark throughout the app and widget
-- Everything else stays exactly where you left it: your companion, your hats, your unlock streak, and your widget
+- A new name, a new icon, and a new mark across the app, the widget and the share card
+- A cleaner main screen: the date is the headline now, and the chrome got out of its way
+- Tap any day in the date picker to open it straight away
+- Smoother and quicker throughout, including a fix for the jump on cold launch
 
-Nothing to do on your end. Your memories never left your device.
+Your companion, your hats, your unlock streak and any widget you have placed all carry over exactly as they were. Nothing to do on your end — and as always, your photos never leave your device.
 
 ---
 

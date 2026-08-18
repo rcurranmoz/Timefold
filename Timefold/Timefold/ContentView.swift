@@ -356,7 +356,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 // Nameplate row
                 ZStack {
-                    BrandWordmark(isCompact: true)
+                    BrandWordmark(isCompact: isCompact)
 
                     HStack {
                         mastheadGlyph("gearshape", label: "Settings") { showingSettings = true }
@@ -508,9 +508,9 @@ private struct BrandWordmark: View {
     private var glyphs: some View {
         HStack(spacing: isCompact ? 2 : 3) {
             Image(systemName: "camera.aperture")
-                .font(.system(size: isCompact ? 13 : 16, weight: .semibold))
+                .font(.system(size: isCompact ? 15 : 19, weight: .semibold))
             Text("Latent")
-                .font(.system(size: isCompact ? 16 : 20, weight: .bold, design: .rounded))
+                .font(.system(size: isCompact ? 19 : 24, weight: .bold, design: .rounded))
         }
         .fixedSize()
     }

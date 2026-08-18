@@ -12,6 +12,8 @@
 		DBDD32962F2BE58400DF414F /* TimefoldWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DBDD32822F2BE58300DF414F /* TimefoldWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DBDD32A12F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */; };
 		DBDD32A22F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */; };
+		DBDD32B02F2BE77300DF414F /* LatentMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32B22F2BE77300DF414F /* LatentMark.swift */; };
+		DBDD32B12F2BE77300DF414F /* LatentMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32B22F2BE77300DF414F /* LatentMark.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,6 +47,7 @@
 		DBDD32862F2BE58300DF414F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		DBDD329D2F2BE6F200DF414F /* TimefoldWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TimefoldWidgetExtension.entitlements; sourceTree = "<group>"; };
 		DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedMemoriesManager.swift; sourceTree = "<group>"; };
+		DBDD32B22F2BE77300DF414F /* LatentMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatentMark.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -97,6 +100,7 @@
 			isa = PBXGroup;
 			children = (
 				DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */,
+				DBDD32B22F2BE77300DF414F /* LatentMark.swift */,
 				DBDD329D2F2BE6F200DF414F /* TimefoldWidgetExtension.entitlements */,
 				DB0BBBD42F1FEBE900C9B414 /* Timefold */,
 				DBDD32882F2BE58300DF414F /* TimefoldWidget */,
@@ -233,6 +237,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DBDD32A12F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */,
+				DBDD32B02F2BE77300DF414F /* LatentMark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -241,6 +246,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DBDD32A22F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */,
+				DBDD32B12F2BE77300DF414F /* LatentMark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

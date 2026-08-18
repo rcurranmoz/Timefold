@@ -504,27 +504,29 @@ struct ContentView: View {
 private struct BrandWordmark: View {
     let isCompact: Bool
 
-    private var tracking: CGFloat { isCompact ? 2.5 : 3.5 }
+    private var tracking: CGFloat { isCompact ? 5 : 7 }
     @State private var shimmer = false
 
     private var glyphs: some View {
-        HStack(spacing: isCompact ? 6 : 8) {
-            Image(systemName: "camera.aperture")
-                .font(.system(size: isCompact ? 15 : 18, weight: .semibold))
+        HStack(spacing: isCompact ? 9 : 12) {
+            LatentMark()
+                .frame(height: isCompact ? 19 : 24)
             Text("LATENT")
-                .font(.system(size: isCompact ? 15 : 19, weight: .heavy, design: .rounded))
-                .kerning(tracking)
-                // .kerning also pads after the final letter, which drags a
+                // Geometric caps to match the logotype. Avenir Next ships with
+                // iOS, so the lockup needs no bundled font to stay on-brand.
+                .font(.custom("AvenirNext-Medium", size: isCompact ? 14 : 17))
+                .tracking(tracking)
+                // .tracking also pads after the final letter, which drags a
                 // centered wordmark half a letter-space to the left. Take it
                 // back so the mark sits optically centered in the nameplate.
                 .padding(.trailing, -tracking)
+                .foregroundStyle(.primary)
         }
         .fixedSize()
     }
 
     var body: some View {
         glyphs
-            .foregroundStyle(Theme.brandGradient)
             .overlay {
                 GeometryReader { geo in
                     let w = max(geo.size.width, 1)
@@ -719,15 +721,14 @@ private struct BrandedLoadingView: View {
                 }
                 .frame(height: 190)
                 .overlay(alignment: .bottom) {
-                    // Clock badge tucked onto the stack's lower-right corner
+                    // Brand badge tucked onto the stack's lower-right corner
                     ZStack {
                         Circle()
                             .fill(Theme.mat)
                             .frame(width: 46, height: 46)
                             .shadow(color: .black.opacity(0.16), radius: 8, y: 4)
-                        Image(systemName: "camera.aperture")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(Theme.brandGradient)
+                        LatentMark()
+                            .frame(height: 17)
                     }
                     .offset(x: 62, y: -26)
                 }

@@ -139,8 +139,8 @@ struct AccessoryCircularView: View {
         ZStack {
             AccessoryWidgetBackground()
             VStack(spacing: 0) {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 10, weight: .semibold))
+                LatentMark(monochrome: .primary)
+                    .frame(height: 9)
                 Text("\(entry.count)")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .minimumScaleFactor(0.6)
@@ -155,8 +155,8 @@ struct AccessoryRectangularView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 3) {
-                Image(systemName: "camera.aperture")
-                    .font(.caption2.weight(.semibold))
+                LatentMark(monochrome: .primary)
+                    .frame(height: 9)
                 Text("Latent")
                     .font(.caption2.weight(.semibold))
             }

@@ -503,14 +503,21 @@ struct ContentView: View {
 // MARK: - Brand Wordmark (animated)
 private struct BrandWordmark: View {
     let isCompact: Bool
+
+    private var tracking: CGFloat { isCompact ? 2.5 : 3.5 }
     @State private var shimmer = false
 
     private var glyphs: some View {
-        HStack(spacing: isCompact ? 2 : 3) {
+        HStack(spacing: isCompact ? 6 : 8) {
             Image(systemName: "camera.aperture")
-                .font(.system(size: isCompact ? 15 : 19, weight: .semibold))
-            Text("Latent")
-                .font(.system(size: isCompact ? 19 : 24, weight: .bold, design: .rounded))
+                .font(.system(size: isCompact ? 15 : 18, weight: .semibold))
+            Text("LATENT")
+                .font(.system(size: isCompact ? 15 : 19, weight: .heavy, design: .rounded))
+                .kerning(tracking)
+                // .kerning also pads after the final letter, which drags a
+                // centered wordmark half a letter-space to the left. Take it
+                // back so the mark sits optically centered in the nameplate.
+                .padding(.trailing, -tracking)
         }
         .fixedSize()
     }

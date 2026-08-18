@@ -118,3 +118,33 @@ struct LatentMark: View {
     }
     .padding(40)
 }
+
+#if canImport(UIKit)
+import UIKit
+
+extension LatentPeak {
+    /// The same outline as `path(in:)`, as a CGPath.
+    ///
+    /// The share card is drawn with UIKit into a 1080x1920 bitmap rather than
+    /// by SwiftUI, and that image is the most public thing the app makes — it
+    /// gets posted. Deriving it from this one definition is what stops the mark
+    /// on a shared story from drifting away from the mark in the app.
+    func cgPath(in rect: CGRect) -> CGPath {
+        let h = rect.height
+        let r = LatentMarkGeometry.corner * h
+        let apexX = rect.minX + (LatentMarkGeometry.halfBase + apexOffset) * h
+
+        let apex  = CGPoint(x: apexX, y: rect.minY)
+        let left  = CGPoint(x: apexX - LatentMarkGeometry.halfBase * h, y: rect.maxY)
+        let right = CGPoint(x: apexX + LatentMarkGeometry.halfBase * h, y: rect.maxY)
+
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: apexX, y: rect.maxY))
+        path.addArc(tangent1End: right, tangent2End: apex,  radius: r)
+        path.addArc(tangent1End: apex,  tangent2End: left,  radius: r)
+        path.addArc(tangent1End: left,  tangent2End: right, radius: r)
+        path.closeSubpath()
+        return path
+    }
+}
+#endif

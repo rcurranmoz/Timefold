@@ -3254,22 +3254,26 @@ nonisolated private func makeStoryImage(from image: UIImage, asset: PHAsset, can
         let logoY = 120 * scale
         let badgeCornerRadius = 32 * scale
         let badgePadding = 32 * scale
-        let apertureRadius = 42 * scale
+        let markHeight = 58 * scale
+        let markWidth = markHeight * LatentMarkGeometry.aspect
         let dividerSpacing = 32 * scale
         let dividerWidth = 4 * scale
         let fontSize = 58 * scale
-        let kern = 10 * scale
+        // Same tracking-to-size ratio the masthead lockup uses.
+        let kern = 24 * scale
+        let brandFont = UIFont(name: "AvenirNext-Medium", size: fontSize)
+            ?? .systemFont(ofSize: fontSize, weight: .medium)
 
         let textAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: fontSize, weight: .black),
+            .font: brandFont,
             .foregroundColor: UIColor.white,
             .kern: kern
         ]
         let text = "LATENT" as NSString
         let textSize = text.size(withAttributes: textAttrs)
 
-        let badgeContentWidth = apertureRadius * 2 + dividerSpacing + dividerWidth + dividerSpacing + textSize.width
-        let badgeContentHeight = max(apertureRadius * 2, textSize.height)
+        let badgeContentWidth = markWidth + dividerSpacing + dividerWidth + dividerSpacing + textSize.width
+        let badgeContentHeight = max(markHeight, textSize.height)
         let badgeWidth = badgeContentWidth + badgePadding * 2
         let badgeHeight = badgeContentHeight + badgePadding * 2
         let badgeX = (canvasSize.width - badgeWidth) / 2
@@ -3313,46 +3317,37 @@ nonisolated private func makeStoryImage(from image: UIImage, asset: PHAsset, can
         UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeCornerRadius).fill()
         ctx.setShadow(offset: .zero, blur: 0, color: nil)
 
-        let apertureCX = badgeX + badgePadding + apertureRadius
-        let apertureCY = logoY + badgeHeight / 2
+        let markCY = logoY + badgeHeight / 2
+        let markRect = CGRect(x: badgeX + badgePadding,
+                              y: markCY - markHeight / 2,
+                              width: markWidth, height: markHeight)
 
-        UIColor.white.withAlphaComponent(0.65).setStroke()
-        let ringPath = UIBezierPath(arcCenter: CGPoint(x: apertureCX, y: apertureCY), radius: apertureRadius, startAngle: 0, endAngle: .pi * 2, clockwise: true)
-        ringPath.lineWidth = 5 * scale
-        ringPath.stroke()
+        // The card's ground is the brand gradient, so a full-colour mark would
+        // sink into it — this one goes white, like the rest of the badge.
+        // Both peaks are drawn at the same alpha and left to composite: where
+        // they cross, 0.55 over 0.55 lifts to 0.80 on its own, so the overlap
+        // still reads as the brighter core it is in the full-colour mark.
+        ctx.setFillColor(UIColor.white.withAlphaComponent(0.55).cgColor)
+        ctx.addPath(LatentPeak().cgPath(in: markRect))
+        ctx.fillPath()
+        ctx.addPath(LatentPeak(apexOffset: LatentMarkGeometry.apexGap).cgPath(in: markRect))
+        ctx.fillPath()
 
-        // Six blades, each sweeping from the rim inward to the next blade's root,
-        // leaving the pinwheel opening of a camera iris. (Chords spanning the full
-        // 120° instead close into a six-pointed star — not what we want.)
-        let bladePath = UIBezierPath()
-        for blade in 0..<6 {
-            let root = CGFloat(blade) * (.pi / 3)
-            let tip = root + (.pi / 3)
-            bladePath.move(to: CGPoint(x: apertureCX + cos(root) * apertureRadius,
-                                       y: apertureCY + sin(root) * apertureRadius))
-            bladePath.addLine(to: CGPoint(x: apertureCX + cos(tip) * apertureRadius * 0.52,
-                                          y: apertureCY + sin(tip) * apertureRadius * 0.52))
-        }
-        bladePath.lineWidth = 4.5 * scale
-        bladePath.lineCapStyle = .round
-        bladePath.lineJoinStyle = .round
-        bladePath.stroke()
-
-        let dividerX = apertureCX + apertureRadius + dividerSpacing
+        let dividerX = markRect.maxX + dividerSpacing
         let dividerHeight = badgeContentHeight * 0.6
         let divPath = UIBezierPath()
-        divPath.move(to: CGPoint(x: dividerX, y: apertureCY - dividerHeight / 2))
-        divPath.addLine(to: CGPoint(x: dividerX, y: apertureCY + dividerHeight / 2))
+        divPath.move(to: CGPoint(x: dividerX, y: markCY - dividerHeight / 2))
+        divPath.addLine(to: CGPoint(x: dividerX, y: markCY + dividerHeight / 2))
         divPath.lineWidth = dividerWidth
         UIColor.white.withAlphaComponent(0.65).setStroke()
         divPath.stroke()
 
         let subtleAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: fontSize, weight: .black),
+            .font: brandFont,
             .foregroundColor: UIColor.white.withAlphaComponent(0.65),
             .kern: kern
         ]
-        text.draw(at: CGPoint(x: dividerX + dividerSpacing, y: apertureCY - textSize.height / 2), withAttributes: subtleAttrs)
+        text.draw(at: CGPoint(x: dividerX + dividerSpacing, y: markCY - textSize.height / 2), withAttributes: subtleAttrs)
 
         let borderRect = photoRect.insetBy(dx: -30 * scale, dy: -30 * scale)
         ctx.setFillColor(UIColor.white.cgColor)

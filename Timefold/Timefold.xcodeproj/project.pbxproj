@@ -387,9 +387,10 @@
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Latent;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Timefold may save memories to your photo library if you chose.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold shows photos taken on today's date. Photos never leave your device.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Latent may save memories to your photo library if you choose.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Latent shows photos taken on today's date. Photos never leave your device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
@@ -424,9 +425,10 @@
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Latent;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Timefold may save memories to your photo library if you chose.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold shows photos taken on today's date. Photos never leave your device.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Latent may save memories to your photo library if you choose.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Latent shows photos taken on today's date. Photos never leave your device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
@@ -461,9 +463,9 @@
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TimefoldWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TimefoldWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = Latent;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold widget neesd access to show your memories";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "The Latent widget needs access to show your memories.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -493,9 +495,9 @@
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TimefoldWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TimefoldWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = Latent;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold widget neesd access to show your memories";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "The Latent widget needs access to show your memories.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

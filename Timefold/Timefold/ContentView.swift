@@ -7,7 +7,7 @@ import WidgetKit
 import AVKit
 
 // MARK: - Theme
-// Single source of truth for Timefold's visual identity: warm, tactile,
+// Single source of truth for Latent's visual identity: warm, tactile,
 // scrapbook-y. Every branded surface (reveal, loading, empty, permission)
 // shares one "sky" that follows the time of day, so opening the app at dawn
 // feels different from opening it at midnight — but always cozy.
@@ -77,11 +77,11 @@ enum Theme {
 
 extension Font {
     /// Serif face for dates & headlines — the "memory" voice.
-    static func timefoldSerif(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
+    static func latentSerif(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
         .system(size: size, weight: weight, design: .serif)
     }
     /// Rounded face for meta labels, hints, and companion dialogue.
-    static func timefoldRounded(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+    static func latentRounded(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight, design: .rounded)
     }
 }
@@ -89,7 +89,7 @@ extension Font {
 extension Text {
     /// Kerned, small-caps-feeling meta label in the brand voice.
     func metaLabel(_ size: CGFloat = 12, color: Color = Theme.inkSoft) -> some View {
-        self.font(.timefoldRounded(size))
+        self.font(.latentRounded(size))
             .kerning(2.4)
             .foregroundStyle(color)
     }
@@ -390,7 +390,7 @@ struct ContentView: View {
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(formatDateString(selectedDate))
-                                .font(.timefoldSerif(32))
+                                .font(.latentSerif(32))
                                 .foregroundStyle(.primary)
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 12, weight: .semibold))
@@ -408,7 +408,7 @@ struct ContentView: View {
                             model.loadMemoriesFor(date: Date())
                         } label: {
                             Text("Today")
-                                .font(.timefoldRounded(12, weight: .semibold))
+                                .font(.latentRounded(12, weight: .semibold))
                                 .foregroundStyle(Theme.pink)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 4)
@@ -421,7 +421,7 @@ struct ContentView: View {
                 }
 
                 Text(mastheadMeta)
-                    .font(.timefoldRounded(10))
+                    .font(.latentRounded(10))
                     .kerning(1.6)
                     .foregroundStyle(.secondary)
                     .padding(.top, 3)
@@ -507,9 +507,9 @@ private struct BrandWordmark: View {
 
     private var glyphs: some View {
         HStack(spacing: isCompact ? 2 : 3) {
-            Image(systemName: "clock.arrow.circlepath")
+            Image(systemName: "camera.aperture")
                 .font(.system(size: isCompact ? 13 : 16, weight: .semibold))
-            Text("Timefold")
+            Text("Latent")
                 .font(.system(size: isCompact ? 16 : 20, weight: .bold, design: .rounded))
         }
         .fixedSize()
@@ -575,7 +575,7 @@ private struct PermissionView: View {
                 VStack(spacing: 12) {
                     Text("Remember this")
                         .multilineTextAlignment(.center)
-                        .font(.timefoldSerif(40))
+                        .font(.latentSerif(40))
                         .foregroundStyle(ink)
                     Text("PHOTOS FROM THIS DAY,\nEVERY PAST YEAR")
                         .metaLabel(11, color: inkSoft)
@@ -592,7 +592,7 @@ private struct PermissionView: View {
                 VStack(spacing: 18) {
                     Button(action: onRequest) {
                         Text("Open My Memories")
-                            .font(.timefoldRounded(17, weight: .bold))
+                            .font(.latentRounded(17, weight: .bold))
                             .frame(maxWidth: .infinity)
                             .padding()
                             .background(Theme.brandGradient)
@@ -603,7 +603,7 @@ private struct PermissionView: View {
 
                     VStack(spacing: 4) {
                         Label("100% Private", systemImage: "lock.shield.fill")
-                            .font(.timefoldRounded(12))
+                            .font(.latentRounded(12))
                             .foregroundStyle(inkSoft)
                         Text("No accounts • No ads • Nothing leaves your device")
                             .font(.system(size: 11))
@@ -655,7 +655,7 @@ private struct PolaroidFrame<Photo: View>: View {
             ZStack {
                 if let caption {
                     Text(caption)
-                        .font(.timefoldSerif(photoSize * 0.13, weight: .semibold))
+                        .font(.latentSerif(photoSize * 0.13, weight: .semibold))
                         .italic()
                         .foregroundStyle(Theme.ink.opacity(0.7))
                 }
@@ -718,7 +718,7 @@ private struct BrandedLoadingView: View {
                             .fill(Theme.mat)
                             .frame(width: 46, height: 46)
                             .shadow(color: .black.opacity(0.16), radius: 8, y: 4)
-                        Image(systemName: "clock.arrow.circlepath")
+                        Image(systemName: "camera.aperture")
                             .font(.system(size: 22, weight: .semibold))
                             .foregroundStyle(Theme.brandGradient)
                     }
@@ -768,12 +768,12 @@ private struct EmptyMemoriesView: View {
                     .scaleEffect(0.62)
                     .frame(height: 150)
                 Text(dateString)
-                    .font(.timefoldSerif(38))
+                    .font(.latentSerif(38))
                     .foregroundStyle(Theme.skyInk())
                 Text("NO MEMORIES ON THIS DAY YET")
                     .metaLabel(11, color: Theme.skyInkSoft())
                 Text("Today's photos become next year's memories.\nGo make one worth keeping.")
-                    .font(.timefoldRounded(14, weight: .medium))
+                    .font(.latentRounded(14, weight: .medium))
                     .foregroundStyle(Theme.skyInkSoft().opacity(0.9))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 44)
@@ -782,7 +782,7 @@ private struct EmptyMemoriesView: View {
                 if let onExplore {
                     Button(action: onExplore) {
                         Label("Explore another day", systemImage: "calendar")
-                            .font(.timefoldRounded(14, weight: .semibold))
+                            .font(.latentRounded(14, weight: .semibold))
                             .foregroundStyle(Theme.skyInk())
                             .padding(.horizontal, 18)
                             .padding(.vertical, 10)
@@ -814,12 +814,12 @@ private struct DeniedAccessView: View {
                     .scaleEffect(0.62)
                     .frame(height: 150)
                 Text("No peeking allowed")
-                    .font(.timefoldSerif(32))
+                    .font(.latentSerif(32))
                     .foregroundStyle(Theme.skyInk())
-                Text("TIMEFOLD CAN'T SEE YOUR PHOTOS")
+                Text("LATENT CAN'T SEE YOUR PHOTOS")
                     .metaLabel(11, color: Theme.skyInkSoft())
-                Text("Everything stays on your device — Timefold just needs permission to show your own memories back to you.")
-                    .font(.timefoldRounded(14, weight: .medium))
+                Text("Everything stays on your device — Latent just needs permission to show your own memories back to you.")
+                    .font(.latentRounded(14, weight: .medium))
                     .foregroundStyle(Theme.skyInkSoft().opacity(0.9))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 44)
@@ -831,7 +831,7 @@ private struct DeniedAccessView: View {
                     }
                 } label: {
                     Text("Open Settings")
-                        .font(.timefoldRounded(16, weight: .bold))
+                        .font(.latentRounded(16, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 28)
                         .padding(.vertical, 12)
@@ -868,8 +868,8 @@ private struct MemoriesGridView: View {
     private var hiddenIndex: Int? {
         guard assets.count > 1 else { return nil }
         #if DEBUG
-        // Testing hook: force the hiding spot with TIMEFOLD_EGG_INDEX.
-        if let forced = ProcessInfo.processInfo.environment["TIMEFOLD_EGG_INDEX"],
+        // Testing hook: force the hiding spot with LATENT_EGG_INDEX.
+        if let forced = ProcessInfo.processInfo.environment["LATENT_EGG_INDEX"],
            let i = Int(forced) {
             return i % assets.count
         }
@@ -894,7 +894,7 @@ private struct MemoriesGridView: View {
                 VStack {
                     Spacer()
                     Text(String(year))
-                        .font(.timefoldSerif(84))
+                        .font(.latentSerif(84))
                         .foregroundStyle(.primary.opacity(0.32))
                         .shadow(color: Color(uiColor: .systemBackground).opacity(0.6), radius: 12)
                     Spacer()
@@ -1517,7 +1517,7 @@ private struct MemoryPagerView: View {
     }
     
     private func shareCaption(from date: Date?) -> String {
-        guard let date else { return "A memory from Timefold" }
+        guard let date else { return "A memory from Latent" }
         let years = Calendar.current.dateComponents([.year], from: date, to: Date()).year ?? 0
         if years <= 0 {
             return "Today"
@@ -2189,11 +2189,11 @@ struct DatePickerView: View {
         NavigationStack {
             VStack(spacing: 8) {
                 Text("Jump to a date")
-                    .font(.timefoldSerif(24))
+                    .font(.latentSerif(24))
                     .padding(.top, 20)
 
                 Text("Tap a day to open it")
-                    .font(.timefoldRounded(13, weight: .medium))
+                    .font(.latentRounded(13, weight: .medium))
                     .foregroundStyle(.secondary)
 
                 DatePicker(
@@ -2239,9 +2239,9 @@ struct SettingsView: View {
         let day = VisitTracker.dayCount
         let days = day == 1 ? "1 day" : "\(day) days"
         if let next = HatKind.allCases.filter({ !$0.isUnlocked }).min(by: { $0.unlockDay < $1.unlockDay }) {
-            return "You've opened Timefold on \(days). Next hat unlocks on day \(next.unlockDay)."
+            return "You've opened Latent on \(days). Next hat unlocks on day \(next.unlockDay)."
         }
-        return "You've opened Timefold on \(days) — every hat is yours."
+        return "You've opened Latent on \(days) — every hat is yours."
     }
 
     var body: some View {
@@ -2297,7 +2297,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle("Include Timefold Frame", isOn: $shareWithFrame)
+                    Toggle("Include Latent Frame", isOn: $shareWithFrame)
                 } header: {
                     Text("Sharing")
                 } footer: {
@@ -2750,7 +2750,7 @@ private struct DailyRevealView: View {
                         .offset(y: showMeta ? 0 : -8)
 
                     Text(headlineString)
-                        .font(.timefoldSerif(44))
+                        .font(.latentSerif(44))
                         .foregroundStyle(ink)
                         .opacity(showHeadline ? 1 : 0)
                         .scaleEffect(showHeadline ? 1 : 0.92)
@@ -2814,7 +2814,7 @@ private struct DailyRevealView: View {
                 .frame(height: 190)
 
                 Text("tap to open")
-                    .font(.timefoldRounded(13, weight: .medium))
+                    .font(.latentRounded(13, weight: .medium))
                     .foregroundStyle(inkSoft.opacity(0.7))
                     .padding(.top, 12)
                     .padding(.bottom, 46)
@@ -3101,7 +3101,8 @@ private struct TimeSprite: View {
 
     // MARK: toppers
 
-    // Foldy — a little ticking clock, a nod to "Timefold."
+    // Foldy — a little ticking clock. Predates the Latent rename; kept so
+    // existing users don't lose the mascot they've been unlocking hats for.
     private var clockTopknot: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -3245,7 +3246,7 @@ nonisolated private func makeStoryImage(from image: UIImage, asset: PHAsset, can
         let logoY = 120 * scale
         let badgeCornerRadius = 32 * scale
         let badgePadding = 32 * scale
-        let clockRadius = 42 * scale
+        let apertureRadius = 42 * scale
         let dividerSpacing = 32 * scale
         let dividerWidth = 4 * scale
         let fontSize = 58 * scale
@@ -3256,11 +3257,11 @@ nonisolated private func makeStoryImage(from image: UIImage, asset: PHAsset, can
             .foregroundColor: UIColor.white,
             .kern: kern
         ]
-        let text = "TIMEFOLD" as NSString
+        let text = "LATENT" as NSString
         let textSize = text.size(withAttributes: textAttrs)
 
-        let badgeContentWidth = clockRadius * 2 + dividerSpacing + dividerWidth + dividerSpacing + textSize.width
-        let badgeContentHeight = max(clockRadius * 2, textSize.height)
+        let badgeContentWidth = apertureRadius * 2 + dividerSpacing + dividerWidth + dividerSpacing + textSize.width
+        let badgeContentHeight = max(apertureRadius * 2, textSize.height)
         let badgeWidth = badgeContentWidth + badgePadding * 2
         let badgeHeight = badgeContentHeight + badgePadding * 2
         let badgeX = (canvasSize.width - badgeWidth) / 2
@@ -3304,38 +3305,36 @@ nonisolated private func makeStoryImage(from image: UIImage, asset: PHAsset, can
         UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeCornerRadius).fill()
         ctx.setShadow(offset: .zero, blur: 0, color: nil)
 
-        let clockCX = badgeX + badgePadding + clockRadius
-        let clockCY = logoY + badgeHeight / 2
+        let apertureCX = badgeX + badgePadding + apertureRadius
+        let apertureCY = logoY + badgeHeight / 2
 
         UIColor.white.withAlphaComponent(0.65).setStroke()
-        let clockPath = UIBezierPath(arcCenter: CGPoint(x: clockCX, y: clockCY), radius: clockRadius, startAngle: 0, endAngle: .pi * 2, clockwise: true)
-        clockPath.lineWidth = 5 * scale
-        clockPath.stroke()
+        let ringPath = UIBezierPath(arcCenter: CGPoint(x: apertureCX, y: apertureCY), radius: apertureRadius, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+        ringPath.lineWidth = 5 * scale
+        ringPath.stroke()
 
-        let hourPath = UIBezierPath()
-        hourPath.move(to: CGPoint(x: clockCX, y: clockCY))
-        hourPath.addLine(to: CGPoint(x: clockCX, y: clockCY - clockRadius * 0.6))
-        hourPath.lineWidth = 5 * scale
-        hourPath.lineCapStyle = .round
-        UIColor.white.withAlphaComponent(0.65).setStroke()
-        hourPath.stroke()
+        // Six blades, each sweeping from the rim inward to the next blade's root,
+        // leaving the pinwheel opening of a camera iris. (Chords spanning the full
+        // 120° instead close into a six-pointed star — not what we want.)
+        let bladePath = UIBezierPath()
+        for blade in 0..<6 {
+            let root = CGFloat(blade) * (.pi / 3)
+            let tip = root + (.pi / 3)
+            bladePath.move(to: CGPoint(x: apertureCX + cos(root) * apertureRadius,
+                                       y: apertureCY + sin(root) * apertureRadius))
+            bladePath.addLine(to: CGPoint(x: apertureCX + cos(tip) * apertureRadius * 0.52,
+                                          y: apertureCY + sin(tip) * apertureRadius * 0.52))
+        }
+        bladePath.lineWidth = 4.5 * scale
+        bladePath.lineCapStyle = .round
+        bladePath.lineJoinStyle = .round
+        bladePath.stroke()
 
-        let minutePath = UIBezierPath()
-        minutePath.move(to: CGPoint(x: clockCX, y: clockCY))
-        minutePath.addLine(to: CGPoint(x: clockCX + clockRadius * 0.5, y: clockCY + clockRadius * 0.2))
-        minutePath.lineWidth = 4.5 * scale
-        minutePath.lineCapStyle = .round
-        UIColor.white.withAlphaComponent(0.65).setStroke()
-        minutePath.stroke()
-
-        UIColor.white.withAlphaComponent(0.65).setFill()
-        UIBezierPath(arcCenter: CGPoint(x: clockCX, y: clockCY), radius: 5.5 * scale, startAngle: 0, endAngle: .pi * 2, clockwise: true).fill()
-
-        let dividerX = clockCX + clockRadius + dividerSpacing
+        let dividerX = apertureCX + apertureRadius + dividerSpacing
         let dividerHeight = badgeContentHeight * 0.6
         let divPath = UIBezierPath()
-        divPath.move(to: CGPoint(x: dividerX, y: clockCY - dividerHeight / 2))
-        divPath.addLine(to: CGPoint(x: dividerX, y: clockCY + dividerHeight / 2))
+        divPath.move(to: CGPoint(x: dividerX, y: apertureCY - dividerHeight / 2))
+        divPath.addLine(to: CGPoint(x: dividerX, y: apertureCY + dividerHeight / 2))
         divPath.lineWidth = dividerWidth
         UIColor.white.withAlphaComponent(0.65).setStroke()
         divPath.stroke()
@@ -3345,7 +3344,7 @@ nonisolated private func makeStoryImage(from image: UIImage, asset: PHAsset, can
             .foregroundColor: UIColor.white.withAlphaComponent(0.65),
             .kern: kern
         ]
-        text.draw(at: CGPoint(x: dividerX + dividerSpacing, y: clockCY - textSize.height / 2), withAttributes: subtleAttrs)
+        text.draw(at: CGPoint(x: dividerX + dividerSpacing, y: apertureCY - textSize.height / 2), withAttributes: subtleAttrs)
 
         let borderRect = photoRect.insetBy(dx: -30 * scale, dy: -30 * scale)
         ctx.setFillColor(UIColor.white.cgColor)

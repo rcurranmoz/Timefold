@@ -139,7 +139,7 @@ struct AccessoryCircularView: View {
         ZStack {
             AccessoryWidgetBackground()
             VStack(spacing: 0) {
-                Image(systemName: "clock.arrow.circlepath")
+                Image(systemName: "camera.aperture")
                     .font(.system(size: 10, weight: .semibold))
                 Text("\(entry.count)")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
@@ -155,9 +155,9 @@ struct AccessoryRectangularView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 3) {
-                Image(systemName: "clock.arrow.circlepath")
+                Image(systemName: "camera.aperture")
                     .font(.caption2.weight(.semibold))
-                Text("Timefold")
+                Text("Latent")
                     .font(.caption2.weight(.semibold))
             }
             Text("\(entry.count) \(entry.count == 1 ? "memory" : "memories")")
@@ -172,13 +172,15 @@ struct AccessoryRectangularView: View {
 }
 
 struct TimefoldWidget: Widget {
+    // Do not rename: WidgetKit persists this per placed widget. Changing it
+    // would silently remove the widget from every existing user's home screen.
     let kind: String = "TimefoldWidget"
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: Provider()) { entry in
             TimefoldWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Timefold")
+        .configurationDisplayName("Latent")
         .description("See how many memories you have from today")
         .supportedFamilies([
             .systemSmall,

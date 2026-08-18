@@ -1,4 +1,4 @@
-# Timefold
+# Latent
 
 A privacy-first iOS app that shows you photos from this day in past years.
 
@@ -10,11 +10,11 @@ A privacy-first iOS app that shows you photos from this day in past years.
 
 ## 📱 About
 
-Timefold is like Timehop, but actually private. No ads, no account required, and nothing leaves your iPhone.
+Latent is like Timehop, but actually private. No ads, no account required, and nothing leaves your iPhone.
 
-Every day, Timefold shows you photos taken on this date in previous years from your Apple Photos library. It's a simple, beautiful way to revisit your memories without sacrificing your privacy.
+Every day, Latent shows you photos taken on this date in previous years from your Apple Photos library. It's a simple, beautiful way to revisit your memories without sacrificing your privacy.
 
-**[Download on the App Store](https://apps.apple.com/us/app/timefold-on-this-day/id6758055406)**
+**[Download on the App Store](https://apps.apple.com/app/id6758055406)**
 
 ## ✨ Features
 
@@ -61,7 +61,7 @@ No dependencies, no setup required!
 
 ## 🏗️ Architecture
 
-Timefold is built with:
+Latent is built with:
 - **SwiftUI** - Modern declarative UI
 - **PhotoKit** - Apple Photos integration
 - **Combine** - Reactive state management
@@ -93,7 +93,7 @@ Built with the idea that your memories are yours, and they should stay that way.
 
 ## 📬 Contact
 
-- **App Store**: [Timefold](https://apps.apple.com/us/app/timefold-on-this-day/id6758055406)
+- **App Store**: [Latent](https://apps.apple.com/app/id6758055406)
 - **Issues**: [GitHub Issues](https://github.com/rcurranmoz/Timefold/issues)
 
 ---

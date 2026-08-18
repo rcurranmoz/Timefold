@@ -12,6 +12,8 @@
 		DBDD32962F2BE58400DF414F /* TimefoldWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DBDD32822F2BE58300DF414F /* TimefoldWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DBDD32A12F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */; };
 		DBDD32A22F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */; };
+		DBDD32B02F2BE77300DF414F /* LatentMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32B22F2BE77300DF414F /* LatentMark.swift */; };
+		DBDD32B12F2BE77300DF414F /* LatentMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDD32B22F2BE77300DF414F /* LatentMark.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,6 +47,7 @@
 		DBDD32862F2BE58300DF414F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		DBDD329D2F2BE6F200DF414F /* TimefoldWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TimefoldWidgetExtension.entitlements; sourceTree = "<group>"; };
 		DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedMemoriesManager.swift; sourceTree = "<group>"; };
+		DBDD32B22F2BE77300DF414F /* LatentMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatentMark.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -97,6 +100,7 @@
 			isa = PBXGroup;
 			children = (
 				DBDD32A02F2BE77300DF414F /* SharedMemoriesManager.swift */,
+				DBDD32B22F2BE77300DF414F /* LatentMark.swift */,
 				DBDD329D2F2BE6F200DF414F /* TimefoldWidgetExtension.entitlements */,
 				DB0BBBD42F1FEBE900C9B414 /* Timefold */,
 				DBDD32882F2BE58300DF414F /* TimefoldWidget */,
@@ -233,6 +237,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DBDD32A12F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */,
+				DBDD32B02F2BE77300DF414F /* LatentMark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -241,6 +246,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DBDD32A22F2BE77300DF414F /* SharedMemoriesManager.swift in Sources */,
+				DBDD32B12F2BE77300DF414F /* LatentMark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -383,23 +389,25 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Timefold/Timefold.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 45;
+				CURRENT_PROJECT_VERSION = 58;
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Latent;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Timefold may save memories to your photo library if you chose.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold shows photos taken on today's date. Photos never leave your device.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Latent may save memories to your photo library if you choose.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Latent shows photos taken on today's date. Photos never leave your device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.6.2;
+				MARKETING_VERSION = 1.8;
+				INFOPLIST_FILE = AppInfo.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold.iOS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -419,23 +427,25 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Timefold/Timefold.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 45;
+				CURRENT_PROJECT_VERSION = 58;
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Latent;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Timefold may save memories to your photo library if you chose.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold shows photos taken on today's date. Photos never leave your device.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Latent may save memories to your photo library if you choose.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Latent shows photos taken on today's date. Photos never leave your device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.6.2;
+				MARKETING_VERSION = 1.8;
+				INFOPLIST_FILE = AppInfo.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold.iOS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -455,19 +465,19 @@
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = TimefoldWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 58;
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TimefoldWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TimefoldWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = Latent;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold widget neesd access to show your memories";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "The Latent widget needs access to show your memories.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold.iOS.TimefoldWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -487,19 +497,19 @@
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = TimefoldWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 58;
 				DEVELOPMENT_TEAM = KA6H3Z2C59;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TimefoldWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TimefoldWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = Latent;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Timefold widget neesd access to show your memories";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "The Latent widget needs access to show your memories.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ryancurran.Timefold.iOS.TimefoldWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

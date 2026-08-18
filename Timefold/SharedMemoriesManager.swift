@@ -2,7 +2,9 @@ import Foundation
 import Photos
 import UIKit
 
-class SharedMemoriesManager {
+/// Pure file I/O against the app-group container — safe from any thread,
+/// and the widget already calls it off the main actor.
+nonisolated final class SharedMemoriesManager: Sendable {
     static let shared = SharedMemoriesManager()
     
     private var containerURL: URL? {

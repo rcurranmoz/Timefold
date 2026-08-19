@@ -1,6 +1,6 @@
 # App Store Release Notes
 
-## App Store description (updated for v1.8 — Latent)
+## App Store description (updated for v2.0 — Latent)
 
 Latent shows you photos from this day in past years — entirely on your device.
 
@@ -16,6 +16,16 @@ Open it each morning and your memories arrive like a hand of polaroids, dealt ou
 - Complete privacy and control
 
 Your photos stay yours.
+
+---
+
+## v2.0 (build 59) — What's New
+
+Timefold is now Latent — and now the App Store knows it too.
+
+The new name landed inside the app last release; this one carries it the rest of the way, so the name on your home screen and the name in the store finally match.
+
+Everything else is exactly where you left it: your companion, your hats, your unlock streak and any widget you have placed. And as always, your photos never leave your device.
 
 ---
 

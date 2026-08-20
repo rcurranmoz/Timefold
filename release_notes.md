@@ -1,6 +1,6 @@
 # App Store Release Notes
 
-## App Store description (updated for v1.8 — Latent)
+## App Store description (updated for v2.0 — Latent: On This Day)
 
 Latent shows you photos from this day in past years — entirely on your device.
 
@@ -16,6 +16,14 @@ Open it each morning and your memories arrive like a hand of polaroids, dealt ou
 - Complete privacy and control
 
 Your photos stay yours.
+
+---
+
+## v2.0 (build 59) — What's New
+
+A small housekeeping release. The App Store listing is now Latent: On This Day, so people can actually find it — on your home screen it's still just Latent.
+
+Nothing else moved. Your companion, your hats, your unlock streak and any widget you've placed are exactly where you left them. And as always, your photos never leave your device.
 
 ---
 

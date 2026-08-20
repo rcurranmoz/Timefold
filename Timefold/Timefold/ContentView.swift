@@ -1081,7 +1081,13 @@ private struct MemoriesGridView: View {
                 ThumbnailPrefetcher.shared.reset(assets: assets, targetSize: thumbPixels)
             }
             .onDisappear {
-                ThumbnailPrefetcher.shared.stopAll()
+                // Deliberately *not* dropping the thumbnail cache here.
+                // Pushing a photo fires the grid's onDisappear, and coming
+                // straight back to the grid is the single most likely next
+                // move — throwing the warm cache away at exactly that moment
+                // would undo the prefetch. PhotoKit evicts under memory
+                // pressure on its own; `reset(assets:targetSize:)` clears it
+                // when the day being shown actually changes.
                 scrollChrome.reset()
             }
             .onAppear {

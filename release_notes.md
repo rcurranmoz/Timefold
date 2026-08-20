@@ -19,6 +19,22 @@ Your photos stay yours.
 
 ---
 
+## v2.0.1 (build 60) — What's New
+
+Speed.
+
+Your grid now loads photos before you scroll to them, so you meet pictures instead of grey placeholders. Opening a photo is quicker and uses about half the memory it used to. And the app finds each day's memories faster every time you open it.
+
+On iPad, thumbnails were being drawn smaller than the screen actually needed, which made them look soft. They don't anymore.
+
+Nothing moved. Your companion, your hats and your unlock streak are exactly where you left them — and as always, your photos never leave your device.
+
+### Alternate (shorter)
+
+A faster Latent. Thumbnails load before you scroll to them, photos open quicker and lighter, and iPad thumbnails are sharp instead of soft. Everything else is exactly where you left it.
+
+---
+
 ## v2.0 (build 59) — What's New
 
 A small housekeeping release. The App Store listing is now Latent: On This Day, so people can actually find it — on your home screen it's still just Latent.

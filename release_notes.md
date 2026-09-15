@@ -23,6 +23,18 @@ Your photos stay yours.
 
 Your day, without the duplicates.
 
+— Best of: near-identical shots tuck behind one card, so a day reads as moments instead of files. Tap the number on a photo to see every shot of that moment.
+— The daily reveal now spans five different years instead of five minutes of the same afternoon.
+— Your widget shows the day's best photo instead of a random one.
+— The daily reminder counts moments, not files, so a single burst no longer looks like a busy day.
+— Fixed: the widget could get stuck on yesterday's photo, and the big year could fade out while you were still scrolling. The widget is easier on your battery too.
+
+Nothing is ever deleted, and it's all worked out on your phone.
+
+### Alternate (longer, prose)
+
+Your day, without the duplicates.
+
 Latent can now tuck near-identical shots behind a single card, so a day reads as moments instead of files. Eight tries at the same selfie become one picture, with a small number showing how many are underneath. Tap that number while you're looking at a photo to see every shot of the moment — and choose a different one if you like it better.
 
 Nothing is hidden from you, and nothing is ever deleted. Turn it on when Latent offers, or any time in Settings.
@@ -32,14 +44,6 @@ The daily reveal got better at its job too. It used to deal five photos from whi
 Your widget shows the day's best photo instead of whichever one it happened to grab. And if you keep the daily reminder on, it now counts moments rather than files — a burst of eight shots of one thing no longer reads as a busy day.
 
 All of this is worked out on your phone. Nothing was sent anywhere to figure it out, and nothing ever will be.
-
-### Alternate
-
-Latent can now tuck near-identical shots behind a single card, so a day reads as moments instead of files — with a number showing how many are underneath, and a tap to see them all.
-
-The daily reveal now spans five different years instead of five minutes of the same afternoon, your widget shows the day's best photo, and the daily reminder counts moments rather than files.
-
-Nothing is ever deleted, and it's all worked out on your phone. Your photos never leave it.
 
 ### Suggested App Store description bullet (optional — not applied above)
 

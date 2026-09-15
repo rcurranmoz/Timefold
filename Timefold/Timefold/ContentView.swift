@@ -186,6 +186,11 @@ struct ContentView: View {
     /// point DailyRevealView falls back to the old prefix(5).
     @State private var revealFan: [PHAsset] = []
     @State private var momentsAreTrustworthy = false
+    /// Which release's "what's new" this person has already seen. Empty for
+    /// anyone who has never seen one — including brand-new installs, which is
+    /// what makes this the introduction to Best of as well as the upgrade note.
+    @AppStorage("seenWhatsNewVersion") private var seenWhatsNewVersion = ""
+    @State private var showingWhatsNew = false
 
     private var isCompact: Bool {
         (UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.screen.bounds.width ?? 375) < 375
@@ -272,6 +277,28 @@ struct ContentView: View {
             selectedDate = Date()
             model.loadMemoriesFor(date: Date())
         }
+        .sheet(isPresented: $showingWhatsNew, onDismiss: {
+            promptNotificationsIfNeeded()
+        }) {
+            WhatsNewView(
+                momentCount: moments.count,
+                assetCount: totalAssetCount,
+                onEnable: {
+                    bestOf = true
+                    seenWhatsNewVersion = Self.whatsNewVersion
+                    showingWhatsNew = false
+                },
+                onDismiss: {
+                    seenWhatsNewVersion = Self.whatsNewVersion
+                    showingWhatsNew = false
+                }
+            )
+            // A fixed height, not a fraction: the content is a known size, and a
+            // fraction leaves a lake of empty space on a large phone while
+            // crowding a small one.
+            .presentationDetents([.height(530)])
+            .presentationDragIndicator(.hidden)
+        }
         .sheet(isPresented: $showingSettings) {
             SettingsView(notificationManager: notificationManager)
         }
@@ -309,7 +336,13 @@ struct ContentView: View {
                         showingReveal = true
                     }
                 } else {
-                    promptNotificationsIfNeeded()
+                    // Curation has to land before we can know whether Best of
+                    // is worth pitching — presentFollowUps() reads
+                    // canShowBestOf, which is false until the pass completes.
+                    Task {
+                        await curate()
+                        presentFollowUps()
+                    }
                 }
             case .empty:
                 promptNotificationsIfNeeded()
@@ -327,7 +360,7 @@ struct ContentView: View {
                     // First launch only: once the reveal has landed, ask about
                     // the daily reminder — after the moment, never during it.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                        promptNotificationsIfNeeded()
+                        presentFollowUps()
                     }
                 }
                 .ignoresSafeArea()
@@ -447,39 +480,6 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
 
-                    if canShowBestOf, !isSelecting, moments.count < totalAssetCount {
-                        Button {
-                            Haptics.tap(.light)
-                            withAnimation(.easeInOut(duration: 0.28)) { bestOf.toggle() }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: bestOf
-                                      ? "square.stack.3d.up.fill"
-                                      : "square.stack.3d.up")
-                                    .font(.system(size: 11, weight: .semibold))
-                                Text("BEST")
-                                    .font(.latentRounded(10, weight: .semibold))
-                                    .kerning(1.2)
-                            }
-                            // `.secondary`, not Theme.inkSoft: the masthead sits on
-                            // system material and inverts with the system appearance,
-                            // where a warm near-black reads as invisible.
-                            .foregroundStyle(bestOf ? Color.white : Color.secondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background {
-                                if bestOf {
-                                    Capsule().fill(Theme.brandGradient)
-                                } else {
-                                    Capsule().fill(Color.primary.opacity(0.10))
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Best of this day")
-                        .accessibilityValue(bestOf ? "On" : "Off")
-                    }
-
                     Spacer()
                 }
 
@@ -507,6 +507,27 @@ struct ContentView: View {
                     .padding(.bottom, -16)
                     .ignoresSafeArea(edges: .top)
             }
+        }
+    }
+
+    /// The release this build wants to introduce. Bump alongside a feature
+    /// worth a note; anyone whose stored value differs sees it once.
+    private static let whatsNewVersion = "2.1"
+
+    /// After the reveal has landed (or when there was none): introduce the
+    /// feature if it is new to this person, and only then ask about
+    /// notifications. Never both at once.
+    private func presentFollowUps() {
+        guard !showingWhatsNew else { return }
+        // Only pitch Best of when it would actually do something here — the
+        // day has duplicates to collapse and Vision really ran.
+        // Don't pitch "Turn it on" at someone who already has. Nobody upgrading
+        // to 2.1 will, but the flag is user-settable and the copy is wrong if so.
+        let worthShowing = canShowBestOf && !bestOf && moments.count < totalAssetCount
+        if seenWhatsNewVersion != Self.whatsNewVersion, worthShowing {
+            showingWhatsNew = true
+        } else {
+            promptNotificationsIfNeeded()
         }
     }
 
@@ -605,6 +626,149 @@ struct ContentView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - What's New
+
+/// Introduces a release's headline feature, once. Doubles as the onboarding for
+/// Best of: the app has no onboarding flow beyond the permission screen, so a
+/// brand-new install meets this the same way an upgrading one does.
+private struct WhatsNewView: View {
+    let momentCount: Int
+    let assetCount: Int
+    let onEnable: () -> Void
+    let onDismiss: () -> Void
+
+    @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+    @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
+    @State private var appeared = false
+
+    private var ink: Color { Theme.skyInk() }
+    private var inkSoft: Color { Theme.skyInkSoft() }
+    private var kind: MascotKind { MascotKind(rawValue: mascotRaw) ?? .foldy }
+    private var hat: HatKind { HatKind(rawValue: hatRaw) ?? .none }
+
+    /// Pitch it with this person's own numbers rather than a generic blurb —
+    /// "76 today, really 51 things" lands harder than "hides duplicates".
+    private var pitch: String {
+        let hidden = max(0, assetCount - momentCount)
+        guard hidden > 0 else {
+            return "Latent can tuck near-identical shots behind a single card, so a day reads as moments instead of files."
+        }
+        return "Today you have \(assetCount) photos — but really about \(momentCount) things that happened. Latent can tuck the \(hidden) near-identical shots behind a single card, and show you the best one."
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.sky().ignoresSafeArea()
+            SunGlow()
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 4)
+
+                Text("NEW")
+                    .metaLabel(11, color: Theme.pink)
+                    .padding(.bottom, 10)
+
+                Text("Best of")
+                    .font(.latentSerif(38))
+                    .foregroundStyle(ink)
+
+                // A stack of cards, which is the idea in one picture.
+                ZStack {
+                    // Three cards fanned behind one, with the same badge the
+                    // grid uses — so the idiom is learned here, not discovered.
+                    ForEach(0..<3, id: \.self) { i in
+                        let depth = Double(2 - i)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Theme.mat)
+                            .frame(width: 92, height: 92)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(Theme.ink.opacity(0.07), lineWidth: 1)
+                            }
+                            .shadow(color: .black.opacity(0.14), radius: 7, y: 4)
+                            .rotationEffect(.degrees(depth * -11))
+                            .offset(x: depth * -17, y: depth * -3)
+                            .opacity(i == 2 ? 1 : 0.7)
+                    }
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Theme.brandGradient.opacity(0.14))
+                        .frame(width: 92, height: 92)
+                        .overlay(alignment: .bottomTrailing) {
+                            HStack(spacing: 2) {
+                                Image(systemName: "square.stack.3d.up.fill")
+                                    .font(.system(size: 8, weight: .semibold))
+                                Text("4")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(.black.opacity(0.45)))
+                            .padding(6)
+                        }
+                }
+                .frame(height: 118)
+                .scaleEffect(appeared ? 1 : 0.9)
+                .opacity(appeared ? 1 : 0)
+
+                Text(pitch)
+                    .font(.latentRounded(15, weight: .regular))
+                    .foregroundStyle(inkSoft)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .padding(.horizontal, 32)
+
+                HStack(spacing: 8) {
+                    TimeSprite(mood: .happy, kind: kind, hat: hat)
+                        .scaleEffect(0.20)
+                        .frame(width: 40, height: 44)
+                    Text("nothing gets deleted, promise")
+                        .font(.latentRounded(12, weight: .medium))
+                        .foregroundStyle(inkSoft.opacity(0.85))
+                }
+                .padding(.top, 12)
+
+                Spacer(minLength: 4)
+
+                VStack(spacing: 10) {
+                    Button(action: onEnable) {
+                        Text("Turn it on")
+                            .font(.latentRounded(17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                            .background(Theme.brandGradient, in: Capsule())
+                            .shadow(color: Theme.pink.opacity(0.3), radius: 12, y: 5)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onDismiss) {
+                        Text("Not now")
+                            .font(.latentRounded(14, weight: .medium))
+                            .foregroundStyle(inkSoft)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 28)
+
+                Text("You can change this any time in Settings.")
+                    .font(.latentRounded(11, weight: .regular))
+                    .foregroundStyle(inkSoft.opacity(0.7))
+                    .padding(.top, 4)
+                    .padding(.bottom, 10)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78).delay(0.1)) {
+                appeared = true
+            }
+        }
+        .interactiveDismissDisabled()
     }
 }
 
@@ -1124,6 +1288,7 @@ private struct MemoriesGridView: View {
                                 isSelecting: isSelecting,
                                 isSelected: selectedAssets.contains(asset.localIdentifier),
                                 stackCount: stackCounts[asset.localIdentifier] ?? 0,
+                                stackCounts: stackCounts,
                                 namespace: heroNS,
                                 onToggleSelection: { toggleSelection(for: asset) },
                                 onDelete: { deletePhoto(asset: asset) }
@@ -1243,6 +1408,8 @@ private struct GridCellView: View {
     let isSelected: Bool
     /// Frames hidden behind this one in "Best of". 0 when it stands alone.
     var stackCount: Int = 0
+    /// Forwarded to the pager so it can say the same thing full-screen.
+    var stackCounts: [String: Int] = [:]
     let namespace: Namespace.ID
     let onToggleSelection: () -> Void
     let onDelete: () -> Void
@@ -1260,7 +1427,7 @@ private struct GridCellView: View {
             } else {
                 // In normal mode, use NavigationLink
                 NavigationLink {
-                    MemoryPagerView(assets: assets, startAsset: asset)
+                    MemoryPagerView(assets: assets, startAsset: asset, stackCounts: stackCounts)
                         .heroDestination(asset.localIdentifier, namespace)
                 } label: {
                     cellContent
@@ -1498,6 +1665,8 @@ private struct AssetThumbnailView: View {
 private struct MemoryPagerView: View {
     let assets: [PHAsset]
     let startAsset: PHAsset
+    /// localIdentifier -> frames this photo stands in for, when "Best of" is on.
+    var stackCounts: [String: Int] = [:]
     var onDismiss: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -1529,6 +1698,13 @@ private struct MemoryPagerView: View {
 
     private var currentAssetIsVideo: Bool {
         assets[safe: selection]?.mediaType == .video
+    }
+
+    /// How many frames the photo on screen stands in for. 1 (or 0) means it is
+    /// the only shot of its moment.
+    private var currentStackCount: Int {
+        guard let id = assets[safe: selection]?.localIdentifier else { return 0 }
+        return stackCounts[id] ?? 0
     }
 
     var body: some View {
@@ -1604,17 +1780,38 @@ private struct MemoryPagerView: View {
             // Year badge overlay
             VStack {
                 if let date = assets[safe: selection]?.creationDate {
-                    HStack {
-                        Spacer()
-                        Text(yearsAgoText(from: date))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        HStack {
+                            Spacer()
+                            Text(yearsAgoText(from: date))
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
+                                .shadow(color: .black.opacity(0.25), radius: 1)
+                        }
+                        // Becca: "I'd want an indicator when I open a duped photo
+                        // that it's duped." Without this, a photo standing in for
+                        // six others looks exactly like one that stands alone.
+                        if currentStackCount > 1 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "square.stack.3d.up.fill")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text("1 of \(currentStackCount) like this")
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            }
                             .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
-                            .shadow(color: .black.opacity(0.25), radius: 1)
-                            .padding(.trailing)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(.black.opacity(0.4)))
+                            .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+                            .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
+                    .padding(.trailing)
                     .padding(.top, 60)
+                    .animation(.easeOut(duration: 0.25), value: currentStackCount)
                 }
                 Spacer()
             }
@@ -2625,6 +2822,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
     @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
+    @AppStorage("bestOfMode") private var bestOf: Bool = false
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
     @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
 
@@ -2687,6 +2885,14 @@ struct SettingsView: View {
                     Text("Notifications")
                 } footer: {
                     Text("Get a daily notification only on days when you have enough memories. A burst of eight shots of the same thing counts as one moment, not eight. Scheduled up to 30 days ahead each time you open the app.")
+                }
+
+                Section {
+                    Toggle("Best of", isOn: $bestOf)
+                } header: {
+                    Text("Your Grid")
+                } footer: {
+                    Text("Tuck near-identical shots behind a single card, so a day reads as moments instead of files. Nothing is ever deleted — turn this off any time to see every photo again.")
                 }
 
                 Section {

@@ -228,7 +228,7 @@ struct ContentView: View {
                 case .loaded(let assets):
                     MemoriesGridView(
                         assets: displayed(assets),
-                        stackCounts: stackCounts,
+                        stacks: stacks,
                         isRevealActive: showingReveal,
                         onRefresh: { await model.reloadQuietly(for: selectedDate) },
                         isSelecting: $isSelecting,
@@ -579,11 +579,12 @@ struct ContentView: View {
         return moments.map(\.pick)
     }
 
-    /// How many frames sit behind each pick, for the stack badge.
-    private var stackCounts: [String: Int] {
+    /// pick localIdentifier -> every frame of that moment. Drives the grid
+    /// badge, the pager's indicator, and the filmstrip behind it.
+    private var stacks: [String: [PHAsset]] {
         guard bestOf, canShowBestOf else { return [:] }
         return Dictionary(uniqueKeysWithValues:
-            moments.filter(\.isStack).map { ($0.pick.localIdentifier, $0.count) })
+            moments.filter(\.isStack).map { ($0.pick.localIdentifier, $0.members) })
     }
 
     /// Only offer the toggle once curation has produced something we believe.
@@ -1195,9 +1196,9 @@ private struct YearBadge: View {
 
 private struct MemoriesGridView: View {
     let assets: [PHAsset]
-    /// localIdentifier -> number of frames collapsed behind it, when "Best of"
-    /// is on. Empty otherwise.
-    var stackCounts: [String: Int] = [:]
+    /// localIdentifier -> every frame of that moment, when "Best of" is on.
+    /// Empty otherwise.
+    var stacks: [String: [PHAsset]] = [:]
     var isRevealActive: Bool = false
     var onRefresh: (() async -> Void)? = nil
     @Binding var isSelecting: Bool
@@ -1287,8 +1288,8 @@ private struct MemoriesGridView: View {
                                 thumbnailSize: thumbPixels,
                                 isSelecting: isSelecting,
                                 isSelected: selectedAssets.contains(asset.localIdentifier),
-                                stackCount: stackCounts[asset.localIdentifier] ?? 0,
-                                stackCounts: stackCounts,
+                                stackCount: stacks[asset.localIdentifier]?.count ?? 0,
+                                stacks: stacks,
                                 namespace: heroNS,
                                 onToggleSelection: { toggleSelection(for: asset) },
                                 onDelete: { deletePhoto(asset: asset) }
@@ -1409,7 +1410,7 @@ private struct GridCellView: View {
     /// Frames hidden behind this one in "Best of". 0 when it stands alone.
     var stackCount: Int = 0
     /// Forwarded to the pager so it can say the same thing full-screen.
-    var stackCounts: [String: Int] = [:]
+    var stacks: [String: [PHAsset]] = [:]
     let namespace: Namespace.ID
     let onToggleSelection: () -> Void
     let onDelete: () -> Void
@@ -1427,7 +1428,7 @@ private struct GridCellView: View {
             } else {
                 // In normal mode, use NavigationLink
                 NavigationLink {
-                    MemoryPagerView(assets: assets, startAsset: asset, stackCounts: stackCounts)
+                    MemoryPagerView(assets: assets, startAsset: asset, stacks: stacks)
                         .heroDestination(asset.localIdentifier, namespace)
                 } label: {
                     cellContent
@@ -1665,8 +1666,8 @@ private struct AssetThumbnailView: View {
 private struct MemoryPagerView: View {
     let assets: [PHAsset]
     let startAsset: PHAsset
-    /// localIdentifier -> frames this photo stands in for, when "Best of" is on.
-    var stackCounts: [String: Int] = [:]
+    /// localIdentifier -> every frame of this moment, when "Best of" is on.
+    var stacks: [String: [PHAsset]] = [:]
     var onDismiss: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -1681,6 +1682,11 @@ private struct MemoryPagerView: View {
     @State private var opacity: Double = 1.0
     @State private var isZoomed = false
     @GestureState private var dragState: CGFloat = 0
+    /// pick localIdentifier -> the frame of that moment currently on screen.
+    /// Substituting inside the page means swiping still moves between moments
+    /// and nobody loses their place.
+    @State private var frameOverride: [String: PHAsset] = [:]
+    @State private var showingStrip = false
     
     enum ShareItem {
         case image(UIImage)
@@ -1688,23 +1694,41 @@ private struct MemoryPagerView: View {
     }
     
     private var currentImage: UIImage? {
-        guard let asset = assets[safe: selection] else { return nil }
+        guard let asset = currentAsset else { return nil }
         return loadedImages[asset.localIdentifier]
     }
-    
+
     private var currentAsset: PHAsset? {
-        assets[safe: selection]
+        assets[safe: selection].map { displayed($0) }
     }
 
     private var currentAssetIsVideo: Bool {
-        assets[safe: selection]?.mediaType == .video
+        currentAsset?.mediaType == .video
     }
 
-    /// How many frames the photo on screen stands in for. 1 (or 0) means it is
-    /// the only shot of its moment.
-    private var currentStackCount: Int {
-        guard let id = assets[safe: selection]?.localIdentifier else { return 0 }
-        return stackCounts[id] ?? 0
+    /// The pick occupying the current page — not necessarily what is on screen,
+    /// since the filmstrip can substitute another frame of the same moment.
+    private var currentPick: PHAsset? { assets[safe: selection] }
+
+    /// Every frame of the current moment.
+    private var currentStackMembers: [PHAsset] {
+        guard let id = currentPick?.localIdentifier else { return [] }
+        return stacks[id] ?? []
+    }
+
+    private var currentStackCount: Int { currentStackMembers.count }
+
+    /// Which frame of the moment is actually being shown, 1-based.
+    private var currentFrameOrdinal: Int {
+        guard let shown = currentAsset else { return 1 }
+        let i = currentStackMembers.firstIndex { $0.localIdentifier == shown.localIdentifier }
+        return (i ?? 0) + 1
+    }
+
+    /// The photo a given page should display: the substituted frame if the
+    /// filmstrip picked one, otherwise the moment's pick.
+    private func displayed(_ pick: PHAsset) -> PHAsset {
+        frameOverride[pick.localIdentifier] ?? pick
     }
 
     var body: some View {
@@ -1722,6 +1746,9 @@ private struct MemoryPagerView: View {
             .opacity(opacity)
             .onChange(of: selection) {
                 isZoomed = false
+                if showingStrip {
+                    withAnimation(.easeOut(duration: 0.2)) { showingStrip = false }
+                }
                 pruneImageCache()
             }
             .simultaneousGesture(
@@ -1777,6 +1804,12 @@ private struct MemoryPagerView: View {
                     }
             )
             
+            if showingStrip, currentStackCount > 1 {
+                momentStrip
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(2)
+            }
+
             // Year badge overlay
             VStack {
                 if let date = assets[safe: selection]?.creationDate {
@@ -1794,18 +1827,28 @@ private struct MemoryPagerView: View {
                         // that it's duped." Without this, a photo standing in for
                         // six others looks exactly like one that stands alone.
                         if currentStackCount > 1 {
-                            HStack(spacing: 4) {
-                                Image(systemName: "square.stack.3d.up.fill")
-                                    .font(.system(size: 10, weight: .semibold))
-                                Text("1 of \(currentStackCount) like this")
-                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            Button {
+                                Haptics.tap(.light)
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                                    showingStrip.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "square.stack.3d.up.fill")
+                                        .font(.system(size: 10, weight: .semibold))
+                                    Text("\(currentFrameOrdinal) of \(currentStackCount) like this")
+                                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    Image(systemName: showingStrip ? "chevron.down" : "chevron.up")
+                                        .font(.system(size: 8, weight: .bold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(.black.opacity(0.4)))
+                                .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+                                .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
                             }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(Capsule().fill(.black.opacity(0.4)))
-                            .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
-                            .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                            .buttonStyle(.plain)
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
@@ -1916,13 +1959,14 @@ private struct MemoryPagerView: View {
     
     /// One page of the pager, factored out to keep the type-checker happy.
     private func pagerPage(index: Int, asset: PHAsset) -> some View {
-        PagedPhotoView(
-            asset: asset,
+        let shown = displayed(asset)
+        return PagedPhotoView(
+            asset: shown,
             // Full-res bitmaps are ~20MB each; only the current page and its
             // neighbors keep theirs in memory.
             isNearSelection: abs(index - selection) <= 2,
             onImageReady: { img in
-                loadedImages[asset.localIdentifier] = img
+                loadedImages[shown.localIdentifier] = img
             },
             dragOffset: dragOffset,
             onZoomChanged: { isZoomed = $0 }
@@ -1930,10 +1974,75 @@ private struct MemoryPagerView: View {
         .tag(index)
     }
 
+    /// The frames of the current moment, as a strip along the bottom. Tapping
+    /// one substitutes it into the page in place, so a swipe still means "next
+    /// moment" and the reading position never moves.
+    private var momentStrip: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 8) {
+                Text("EVERY SHOT OF THIS MOMENT")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .kerning(1.4)
+                    .foregroundStyle(.white.opacity(0.7))
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(currentStackMembers, id: \.localIdentifier) { member in
+                            let isShown = currentAsset?.localIdentifier == member.localIdentifier
+                            AssetThumbnailView(
+                                asset: member,
+                                targetSize: CGSize(width: 150, height: 150)
+                            )
+                            .frame(width: 62, height: 62)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(isShown ? .white : .white.opacity(0.22),
+                                                  lineWidth: isShown ? 2.5 : 1)
+                            }
+                            .overlay(alignment: .topTrailing) {
+                                // Mark the one the app would have chosen, so the
+                                // pick is legible rather than mysterious.
+                                if member.localIdentifier == currentPick?.localIdentifier {
+                                    Image(systemName: "star.fill")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(.white)
+                                        .padding(3)
+                                        .background(Circle().fill(Theme.pink))
+                                        .offset(x: 4, y: -4)
+                                }
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .onTapGesture {
+                                guard let pick = currentPick else { return }
+                                Haptics.tap(.light)
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    if member.localIdentifier == pick.localIdentifier {
+                                        frameOverride.removeValue(forKey: pick.localIdentifier)
+                                    } else {
+                                        frameOverride[pick.localIdentifier] = member
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(height: 70)
+            }
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial)
+        }
+        .ignoresSafeArea(edges: .bottom)
+    }
+
     /// Drop cached full-res images for pages far from the current one.
     private func pruneImageCache() {
         let keep = Set(((selection - 2)...(selection + 2)).compactMap {
-            assets[safe: $0]?.localIdentifier
+            assets[safe: $0].map { displayed($0).localIdentifier }
         })
         loadedImages = loadedImages.filter { keep.contains($0.key) }
     }
@@ -2007,6 +2116,8 @@ private struct PagedPhotoView: View {
     @State private var lastOffset: CGSize = .zero
     @State private var player: AVPlayer?
     @State private var isPlaying = false
+    /// Which asset the currently-held bitmap belongs to.
+    @State private var shownIdentifier: String?
 
     var body: some View {
         GeometryReader { geo in
@@ -2120,14 +2231,25 @@ private struct PagedPhotoView: View {
             .frame(width: geo.size.width, height: geo.size.height)
             .background(ambientBackdrop)
         }
-        .task(id: isNearSelection) {
-            if isNearSelection {
-                if image == nil { await loadFull() }
-            } else if image != nil {
+        // Keyed on the asset as well as proximity: the filmstrip can swap which
+        // frame a page shows without the page moving, and an id of proximity
+        // alone would leave the previous photo on screen forever.
+        .task(id: "\(asset.localIdentifier)|\(isNearSelection)") {
+            guard isNearSelection else {
                 // TabView keeps far pages alive — don't let them each pin a
                 // full-resolution bitmap.
                 image = nil
                 backdrop = nil
+                shownIdentifier = nil
+                return
+            }
+            if shownIdentifier != asset.localIdentifier {
+                image = nil
+                backdrop = nil
+            }
+            if image == nil {
+                shownIdentifier = asset.localIdentifier
+                await loadFull()
             }
         }
         .onDisappear {

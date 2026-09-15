@@ -191,6 +191,10 @@ struct ContentView: View {
     /// uncurated one meanwhile is what made the grid visibly reshuffle a beat
     /// after launch.
     @State private var curatedToken: String?
+    /// Set the instant we know a reveal is coming, before the curation it waits
+    /// on. Without it there is an ~800ms window where the data has landed but
+    /// the reveal has not, and the grid shows through it.
+    @State private var revealPending = false
     /// Which release's "what's new" this person has already seen. Empty for
     /// anyone who has never seen one — including brand-new installs, which is
     /// what makes this the introduction to Best of as well as the upgrade note.
@@ -204,6 +208,9 @@ struct ContentView: View {
     /// Whether the toolbar chrome (wordmark, gear, calendar…) has anything to
     /// act on. Branded full-screen states carry their own identity.
     private var hasContent: Bool {
+        // A masthead over the loading state announces the day before the reveal
+        // does, which is the reveal's job.
+        if isSettling { return false }
         switch model.state {
         case .loaded, .empty: return true
         default: return false
@@ -231,7 +238,7 @@ struct ContentView: View {
                     }
 
                 case .loaded(let assets):
-                    if awaitingCuration {
+                    if isSettling {
                         // Hold the branded loading state rather than showing a
                         // grid we are about to replace. Only bites the first
                         // time a day is curated; after that the grouping is
@@ -342,12 +349,15 @@ struct ContentView: View {
             case .loaded:
                 if shouldShowReveal() {
                     // Curate before raising the reveal, so its fan is the five
-                    // best moments rather than the five newest files. The app
-                    // is still on the branded loading screen here, and a warm
-                    // pass costs under a millisecond.
+                    // best moments rather than the five newest files. Flag the
+                    // reveal *synchronously* first: the curation is awaited, and
+                    // anything that waits leaves a window for the grid to paint
+                    // through — which is exactly what a fresh install showed.
+                    revealPending = true
                     Task {
                         await curate()
                         showingReveal = true
+                        revealPending = false
                     }
                 } else {
                     // Curation has to land before we can know whether Best of
@@ -396,7 +406,7 @@ struct ContentView: View {
             // Don't announce a count we are about to revise. The grid is on the
             // loading state here anyway, and "76 MEMORIES" flipping to
             // "51 MOMENTS" is the same flicker one line up.
-            if awaitingCuration { return weekday }
+            if isSettling { return weekday }
             let shown = displayed(assets)
             let mem: String
             if bestOf, canShowBestOf {
@@ -599,6 +609,13 @@ struct ContentView: View {
     /// the state landing and the task starting in which the raw grid shows.
     private var awaitingCuration: Bool {
         bestOf && curatedToken != curationToken
+    }
+
+    /// The day's data has arrived but the app is not ready to show it: either
+    /// the grouping is still being computed, or a reveal is about to take the
+    /// screen. The branded loading state stands in for both.
+    private var isSettling: Bool {
+        awaitingCuration || revealPending
     }
 
     /// What the grid should actually show.

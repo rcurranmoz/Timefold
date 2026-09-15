@@ -1965,6 +1965,7 @@ private struct MemoryPagerView: View {
             // Full-res bitmaps are ~20MB each; only the current page and its
             // neighbors keep theirs in memory.
             isNearSelection: abs(index - selection) <= 2,
+            prefersSharp: frameOverride[asset.localIdentifier] != nil,
             onImageReady: { img in
                 loadedImages[shown.localIdentifier] = img
             },
@@ -2032,11 +2033,17 @@ private struct MemoryPagerView: View {
                 .frame(height: 70)
             }
             .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.bottom, 10)
             .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial)
+            // The material bleeds to the screen edge; the thumbnails must not.
+            // ignoresSafeArea on the whole strip ran them under the home
+            // indicator and clipped them.
+            .background {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .ignoresSafeArea(edges: .bottom)
+            }
         }
-        .ignoresSafeArea(edges: .bottom)
     }
 
     /// Drop cached full-res images for pages far from the current one.
@@ -2103,6 +2110,11 @@ private struct MemoryPagerView: View {
 private struct PagedPhotoView: View {
     let asset: PHAsset
     var isNearSelection: Bool = true
+    /// True when this page is showing a frame the reader deliberately chose from
+    /// the moment strip. Arriving at a photo by tapping its thumbnail is a
+    /// different promise than swiping past one, and wants a sharp result rather
+    /// than a fast one.
+    var prefersSharp: Bool = false
     let onImageReady: (UIImage?) -> Void
     let dragOffset: CGFloat
     var onZoomChanged: (Bool) -> Void = { _ in }
@@ -2244,11 +2256,16 @@ private struct PagedPhotoView: View {
                 return
             }
             if shownIdentifier != asset.localIdentifier {
-                image = nil
-                backdrop = nil
-            }
-            if image == nil {
+                // On a deliberate pick, hold the previous frame on screen until
+                // the new one is ready: swapping to a spinner and back is worse
+                // than a beat of the old photo, and both beat showing a blur.
+                if !prefersSharp {
+                    image = nil
+                    backdrop = nil
+                }
                 shownIdentifier = asset.localIdentifier
+                await loadFull()
+            } else if image == nil {
                 await loadFull()
             }
         }
@@ -2337,11 +2354,11 @@ private struct PagedPhotoView: View {
         // a spinner on black until the whole thing was ready.
         // `.opportunistic` hands back PhotoKit's already-on-disk small
         // rendition first (typically within a frame), then upgrades in place.
-        opts.deliveryMode = .opportunistic
+        opts.deliveryMode = prefersSharp ? .highQualityFormat : .opportunistic
         // `.none` meant "give me whatever rendition exists", which for a
         // modern 48MP capture is the untouched original — ~190MB of RGBA
         // once decoded, and up to five pages are alive at a time.
-        opts.resizeMode = .fast
+        opts.resizeMode = prefersSharp ? .exact : .fast
         opts.isNetworkAccessAllowed = true
 
         let target = CGSize(width: 2500, height: 2500)
@@ -2354,6 +2371,9 @@ private struct PagedPhotoView: View {
             guard let img else { return }
             let isPlaceholder = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
             DispatchQueue.main.async {
+                // A request in flight when the frame changed must not paint over
+                // the frame that replaced it.
+                guard self.shownIdentifier == asset.localIdentifier else { return }
                 self.image = img
                 if !isPlaceholder {
                     // The share sheet renders from this bitmap — only ever

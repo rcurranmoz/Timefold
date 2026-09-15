@@ -179,6 +179,11 @@ struct ContentView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingReveal = false
 
+    /// "Best of" — one cell per moment instead of one per file. See MomentCuration.swift.
+    @AppStorage("bestOfMode") private var bestOf = false
+    @State private var moments: [Moment] = []
+    @State private var momentsAreTrustworthy = false
+
     private var isCompact: Bool {
         (UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.screen.bounds.width ?? 375) < 375
     }
@@ -214,7 +219,8 @@ struct ContentView: View {
 
                 case .loaded(let assets):
                     MemoriesGridView(
-                        assets: assets,
+                        assets: displayed(assets),
+                        stackCounts: stackCounts,
                         isRevealActive: showingReveal,
                         onRefresh: { await model.reloadQuietly(for: selectedDate) },
                         isSelecting: $isSelecting,
@@ -248,6 +254,9 @@ struct ContentView: View {
         .task {
             VisitTracker.recordVisit()
             model.start()
+        }
+        .task(id: curationToken) {
+            await curate()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Refresh on foreground only when the day rolled or the data is
@@ -327,8 +336,14 @@ struct ContentView: View {
                     ? "SELECT MEMORIES TO DELETE"
                     : "\(selectedAssets.count) SELECTED"
             }
-            let mem = assets.count == 1 ? "1 MEMORY" : "\(assets.count) MEMORIES"
-            let years = Set(assets.compactMap { $0.creationDate }.map {
+            let shown = displayed(assets)
+            let mem: String
+            if bestOf, canShowBestOf {
+                mem = shown.count == 1 ? "1 MOMENT" : "\(shown.count) MOMENTS"
+            } else {
+                mem = assets.count == 1 ? "1 MEMORY" : "\(assets.count) MEMORIES"
+            }
+            let years = Set(shown.compactMap { $0.creationDate }.map {
                 Calendar.current.component(.year, from: $0)
             }).count
             return years > 1 ? "\(weekday) · \(mem) · ACROSS \(years) YEARS" : "\(weekday) · \(mem)"
@@ -422,6 +437,39 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
 
+                    if canShowBestOf, !isSelecting, moments.count < totalAssetCount {
+                        Button {
+                            Haptics.tap(.light)
+                            withAnimation(.easeInOut(duration: 0.28)) { bestOf.toggle() }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: bestOf
+                                      ? "square.stack.3d.up.fill"
+                                      : "square.stack.3d.up")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("BEST")
+                                    .font(.latentRounded(10, weight: .semibold))
+                                    .kerning(1.2)
+                            }
+                            // `.secondary`, not Theme.inkSoft: the masthead sits on
+                            // system material and inverts with the system appearance,
+                            // where a warm near-black reads as invisible.
+                            .foregroundStyle(bestOf ? Color.white : Color.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background {
+                                if bestOf {
+                                    Capsule().fill(Theme.brandGradient)
+                                } else {
+                                    Capsule().fill(Color.primary.opacity(0.10))
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Best of this day")
+                        .accessibilityValue(bestOf ? "On" : "Off")
+                    }
+
                     Spacer()
                 }
 
@@ -470,6 +518,50 @@ struct ContentView: View {
         guard let last = UserDefaults.standard.object(forKey: "lastRevealDate") as? Date else { return true }
         return Calendar.current.startOfDay(for: last) < today
         #endif
+    }
+
+    /// Re-curate when the day changes or the asset set changes size.
+    private var curationToken: String {
+        guard case .loaded(let assets) = model.state else { return "none" }
+        return "\(MomentCurator.dayKey(for: selectedDate))-\(assets.count)"
+    }
+
+    private func curate() async {
+        guard case .loaded(let assets) = model.state else {
+            moments = []
+            momentsAreTrustworthy = false
+            return
+        }
+        let result = await MomentCurator.shared.moments(
+            for: assets, dayKey: MomentCurator.dayKey(for: selectedDate))
+        let trustworthy = await MomentCurator.shared.visionAvailable
+        moments = result
+        momentsAreTrustworthy = trustworthy
+    }
+
+    /// What the grid should actually show.
+    private func displayed(_ assets: [PHAsset]) -> [PHAsset] {
+        guard bestOf, canShowBestOf else { return assets }
+        return moments.map(\.pick)
+    }
+
+    /// How many frames sit behind each pick, for the stack badge.
+    private var stackCounts: [String: Int] {
+        guard bestOf, canShowBestOf else { return [:] }
+        return Dictionary(uniqueKeysWithValues:
+            moments.filter(\.isStack).map { ($0.pick.localIdentifier, $0.count) })
+    }
+
+    /// Only offer the toggle once curation has produced something we believe.
+    /// Without Vision the moment count is a floor, not an answer — see
+    /// `MomentCurator.visionAvailable`.
+    private var totalAssetCount: Int {
+        if case .loaded(let assets) = model.state { return assets.count }
+        return 0
+    }
+
+    private var canShowBestOf: Bool {
+        momentsAreTrustworthy && !moments.isEmpty
     }
 
     private func markRevealShown() {
@@ -926,6 +1018,9 @@ private struct YearBadge: View {
 
 private struct MemoriesGridView: View {
     let assets: [PHAsset]
+    /// localIdentifier -> number of frames collapsed behind it, when "Best of"
+    /// is on. Empty otherwise.
+    var stackCounts: [String: Int] = [:]
     var isRevealActive: Bool = false
     var onRefresh: (() async -> Void)? = nil
     @Binding var isSelecting: Bool
@@ -1015,6 +1110,7 @@ private struct MemoriesGridView: View {
                                 thumbnailSize: thumbPixels,
                                 isSelecting: isSelecting,
                                 isSelected: selectedAssets.contains(asset.localIdentifier),
+                                stackCount: stackCounts[asset.localIdentifier] ?? 0,
                                 namespace: heroNS,
                                 onToggleSelection: { toggleSelection(for: asset) },
                                 onDelete: { deletePhoto(asset: asset) }
@@ -1132,6 +1228,8 @@ private struct GridCellView: View {
     let thumbnailSize: CGSize
     let isSelecting: Bool
     let isSelected: Bool
+    /// Frames hidden behind this one in "Best of". 0 when it stands alone.
+    var stackCount: Int = 0
     let namespace: Namespace.ID
     let onToggleSelection: () -> Void
     let onDelete: () -> Void
@@ -1198,6 +1296,28 @@ private struct GridCellView: View {
                 .frame(width: cellSize, height: cellSize)
                 .clipped()
                 .opacity(isSelecting && !isSelected ? 0.6 : 1.0)
+
+            // "N more like this" — the frames this pick stands in for.
+            if stackCount > 1 {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        HStack(spacing: 2) {
+                            Image(systemName: "square.stack.3d.up.fill")
+                                .font(.system(size: 8, weight: .semibold))
+                            Text("\(stackCount)")
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(.black.opacity(0.45)))
+                        .padding(5)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
 
             // Video play icon overlay
             if asset.mediaType == .video {

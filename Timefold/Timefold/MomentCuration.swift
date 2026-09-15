@@ -443,6 +443,42 @@ actor MomentCurator {
     }
 }
 
+// MARK: - Cheap approximation
+
+extension MomentCurator {
+    /// Moment count from metadata alone — burst identifiers plus a tight time
+    /// window. No image decoding, no Vision, no actor hop.
+    ///
+    /// For callers where a real curation pass is far too expensive: the
+    /// notification scheduler looks thirty days ahead every time a setting
+    /// changes, and a full pass there would decode a month of photographs to
+    /// answer a yes/no question.
+    ///
+    /// This *undercounts* merging relative to the real thing, because it cannot
+    /// see that two photographs look alike — so it reports **more** moments than
+    /// the app will show. That is the safe direction for a notification: it errs
+    /// toward still telling you about a day, never toward silently going quiet.
+    nonisolated static func approximateMomentCount(of assets: [PHAsset]) -> Int {
+        guard assets.count > 1 else { return assets.count }
+        let ordered = assets.sorted {
+            ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast)
+        }
+        var count = 1
+        for i in 1..<ordered.count {
+            let a = ordered[i - 1], b = ordered[i]
+            if a.mediaType == .image, b.mediaType == .image {
+                if let burst = a.burstIdentifier, burst == b.burstIdentifier { continue }
+                if let da = a.creationDate, let db = b.creationDate,
+                   abs(da.timeIntervalSince(db)) <= CurationTuning.maxSecondsWithoutVision {
+                    continue
+                }
+            }
+            count += 1
+        }
+        return count
+    }
+}
+
 // MARK: - Day keys
 
 extension MomentCurator {

@@ -2503,6 +2503,8 @@ class NotificationManager: ObservableObject {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["dailyMemoriesCheck"])
     }
 
+    /// Number of distinct moments on a given month/day across past years.
+    /// Metadata-only — see `MomentCurator.approximateMomentCount`.
     nonisolated private static func countMemories(month: Int, day: Int, fromYear: Int, beforeYear: Int) -> Int {
         let calendar = Calendar.current
         var datePredicates: [NSPredicate] = []
@@ -2518,13 +2520,21 @@ class NotificationManager: ObservableObject {
         }
         guard !datePredicates.isEmpty else { return 0 }
         let opts = PHFetchOptions()
+        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         opts.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
             NSPredicate(format: "mediaType == %d OR mediaType == %d",
                         PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue),
             NSCompoundPredicate(orPredicateWithSubpredicates: datePredicates)
         ])
         opts.includeHiddenAssets = false
-        return PHAsset.fetchAssets(with: opts).count
+
+        // Count *moments*, not files. "Notify me when there are at least 3"
+        // used to be satisfied by a single burst — one thing that happened,
+        // photographed eight times — which is not what anyone means by it.
+        let results = PHAsset.fetchAssets(with: opts)
+        guard results.count > 0 else { return 0 }
+        let assets = results.objects(at: IndexSet(integersIn: 0..<results.count))
+        return MomentCurator.approximateMomentCount(of: assets)
     }
 
     /// Year of the oldest photo in the library (fallback 2000).
@@ -2666,17 +2676,17 @@ struct SettingsView: View {
                             displayedComponents: .hourAndMinute
                         )
                         
-                        Picker("Minimum Photos", selection: $notificationManager.minimumPhotos) {
-                            Text("1 photo").tag(1)
-                            Text("3 photos").tag(3)
-                            Text("5 photos").tag(5)
-                            Text("10 photos").tag(10)
+                        Picker("Minimum Moments", selection: $notificationManager.minimumPhotos) {
+                            Text("1 moment").tag(1)
+                            Text("3 moments").tag(3)
+                            Text("5 moments").tag(5)
+                            Text("10 moments").tag(10)
                         }
                     }
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("Get a daily notification only on days when you have enough memories. Scheduled up to 30 days ahead each time you open the app.")
+                    Text("Get a daily notification only on days when you have enough memories. A burst of eight shots of the same thing counts as one moment, not eight. Scheduled up to 30 days ahead each time you open the app.")
                 }
 
                 Section {

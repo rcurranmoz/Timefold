@@ -23,7 +23,9 @@ Your photos stay yours.
 
 Your day, without the duplicates.
 
-Tap BEST above your photos and Latent tucks the near-identical shots behind a single card — the good one. Eight tries at the same selfie become one picture, with a small number telling you how many are underneath. Tap through as always; nothing is deleted, nothing is lost.
+Latent can now tuck near-identical shots behind a single card, so a day reads as moments instead of files. Eight tries at the same selfie become one picture, with a small number showing how many are underneath. Tap that number while you're looking at a photo to see every shot of the moment — and choose a different one if you like it better.
+
+Nothing is hidden from you, and nothing is ever deleted. Turn it on when Latent offers, or any time in Settings.
 
 The daily reveal got better at its job too. It used to deal five photos from whichever year was most recent, often five from the same ten minutes. Now it deals the best moment from each of five different years, so opening the app finally feels like the span of time it keeps promising you.
 
@@ -33,17 +35,17 @@ All of this is worked out on your phone. Nothing was sent anywhere to figure it 
 
 ### Alternate
 
-Tap BEST and Latent hides the near-duplicates behind one card — the good one.
+Latent can now tuck near-identical shots behind a single card, so a day reads as moments instead of files — with a number showing how many are underneath, and a tap to see them all.
 
 The daily reveal now spans five different years instead of five minutes of the same afternoon, your widget shows the day's best photo, and the daily reminder counts moments rather than files.
 
-All worked out on your phone. Your photos never leave it.
+Nothing is ever deleted, and it's all worked out on your phone. Your photos never leave it.
 
 ### Suggested App Store description bullet (optional — not applied above)
 
 Add under the existing feature list if you want the store page to carry it:
 
-- Tap BEST to see one card per moment instead of ten near-identical shots
+- Best of: one card per moment instead of ten near-identical shots
 
 ---
 

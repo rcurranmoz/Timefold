@@ -1,13 +1,12 @@
 # App Store Release Notes
 
-## App Store description (updated for v2.0 — Latent: On This Day)
+## App Store description (updated for v2.1 — Best of)
 
 Latent shows you photos from this day in past years — entirely on your device.
 
-Open it each morning and your memories arrive like a hand of polaroids, dealt out by a little companion who's happy you came back.
-
 - No accounts, no ads, no tracking
 - Works with your Apple Photos library
+- Best of: ten near-identical shots become one card, so a day reads as moments
 - A warm daily reveal: photos from this day, across all your years
 - Pick your companion — Foldy, Luna, or Mochi
 - Unlock hats for them just by showing up — no purchases, time is the only currency
@@ -21,17 +20,19 @@ Your photos stay yours.
 
 ## v2.1 (build 63) — What's New
 
+**Submitted as-is.**
+
 Your day, without the duplicates.
 
-— Best of: near-identical shots tuck behind one card, so a day reads as moments instead of files. Tap the number on a photo to see every shot of that moment.
-— The daily reveal now spans five different years instead of five minutes of the same afternoon.
-— Your widget shows the day's best photo instead of a random one.
-— The daily reminder counts moments, not files, so a single burst no longer looks like a busy day.
-— Fixed: the widget could get stuck on yesterday's photo, and the big year could fade out while you were still scrolling. The widget is easier on your battery too.
+- Best of: near-identical shots tuck behind one card, so a day reads as moments instead of files. Tap the number on a photo to see every shot of that moment.
+- The daily reveal now spans five different years instead of five minutes of the same afternoon.
+- Your widget shows the day's best photo instead of a random one.
+- The daily reminder counts moments, not files, so a single burst no longer looks like a busy day.
+- Fixed: the widget could get stuck on yesterday's photo, and the big year could fade out while you were still scrolling. The widget is easier on your battery too.
 
 Nothing is ever deleted, and it's all worked out on your phone.
 
-### Alternate (longer, prose)
+### Alternate (longer, prose — not used)
 
 Your day, without the duplicates.
 
@@ -44,12 +45,6 @@ The daily reveal got better at its job too. It used to deal five photos from whi
 Your widget shows the day's best photo instead of whichever one it happened to grab. And if you keep the daily reminder on, it now counts moments rather than files — a burst of eight shots of one thing no longer reads as a busy day.
 
 All of this is worked out on your phone. Nothing was sent anywhere to figure it out, and nothing ever will be.
-
-### Suggested App Store description bullet (optional — not applied above)
-
-Add under the existing feature list if you want the store page to carry it:
-
-- Best of: one card per moment instead of ten near-identical shots
 
 ---
 

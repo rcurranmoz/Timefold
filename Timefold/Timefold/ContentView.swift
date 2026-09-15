@@ -156,37 +156,15 @@ struct ShimmerView: View {
     }
 }
 
-// MARK: - Hero zoom transition (iOS 18+, graceful no-op on iOS 17)
-private struct HeroSource: ViewModifier {
-    let id: String
-    let ns: Namespace.ID
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.matchedTransitionSource(id: id, in: ns)
-        } else {
-            content
-        }
-    }
-}
-
-private struct HeroDestination: ViewModifier {
-    let id: String
-    let ns: Namespace.ID
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.navigationTransition(.zoom(sourceID: id, in: ns))
-        } else {
-            content
-        }
-    }
-}
-
+// MARK: - Hero zoom transition
+// Both modifiers are iOS 18+; the deployment target is well past that, so
+// there is no fallback branch to carry.
 extension View {
     func heroSource(_ id: String, _ ns: Namespace.ID) -> some View {
-        modifier(HeroSource(id: id, ns: ns))
+        matchedTransitionSource(id: id, in: ns)
     }
     func heroDestination(_ id: String, _ ns: Namespace.ID) -> some View {
-        modifier(HeroDestination(id: id, ns: ns))
+        navigationTransition(.zoom(sourceID: id, in: ns))
     }
 }
 
@@ -896,9 +874,12 @@ final class ScrollChromeModel: ObservableObject {
               let assetDate = assets[index].creationDate else { return }
         let newYear = Calendar.current.component(.year, from: assetDate)
 
-        if year != newYear {
-            // Throttle year changes — only allow changes every 0.3 seconds.
-            guard Date().timeIntervalSince(lastYearChange) > 0.3 else { return }
+        // Throttle the year *value* to one change per 0.3s — but never skip the
+        // hide-timer reschedule below. Scrolling fast through a day that spans
+        // many years throttles almost every update, and an early return here
+        // left an older 800ms timer to fire and fade the badge out with the
+        // user's finger still down.
+        if year != newYear, Date().timeIntervalSince(lastYearChange) > 0.3 {
             lastYearChange = Date()
             withAnimation(.easeInOut(duration: 0.2)) {
                 year = newYear

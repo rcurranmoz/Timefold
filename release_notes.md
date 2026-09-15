@@ -18,6 +18,12 @@ Your photos stay yours.
 
 ---
 
+## v2.1.1 (build 64) — What's New
+
+- Fixed: with Best of on, the grid briefly showed every photo before settling to one card per moment. It now arrives already sorted out, and days you have opened before load instantly.
+
+---
+
 ## v2.1 (build 63) — What's New
 
 **Submitted as-is.**

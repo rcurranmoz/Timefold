@@ -105,6 +105,30 @@ nonisolated enum CurationTuning {
     static let utilityPenalty: Float = 10
 }
 
+// MARK: - Persisted grouping
+
+/// One day's grouping, as identifiers. Persisting the *result* rather than the
+/// feature prints that produced it is the difference between a relaunch costing
+/// a full Vision pass and costing nothing: prints are kilobytes each and only
+/// meaningful within a day, while this is a few hundred bytes and is exactly
+/// what the UI needs.
+private struct CachedMoment: Codable {
+    let pick: String
+    let members: [String]
+}
+
+private struct CachedDay: Codable {
+    /// Identifies the asset set this grouping was computed from. If the day
+    /// gains or loses a photo, this changes and the grouping is recomputed.
+    let fingerprint: String
+    /// Whether Vision actually ran. A grouping produced by the burst-and-time
+    /// fallback is a floor, not an answer, and must not be presented as one.
+    let visionBacked: Bool
+    let moments: [CachedMoment]
+    /// For evicting the oldest entries.
+    let savedAt: Double
+}
+
 // MARK: - Curator
 
 /// Scores assets and groups them into moments.
@@ -128,6 +152,10 @@ actor MomentCurator {
     /// every asset on every pass forever. Session-scoped on purpose: a fresh
     /// launch should try again.
     private var attempted: Set<String> = []
+
+    /// dayKey -> the grouping last computed for it. Read on launch, so opening
+    /// a day already curated earlier costs no Vision work at all.
+    private var dayCache: [String: CachedDay] = [:]
 
     /// False once a pass has produced no feature prints at all — Vision's ML
     /// requests are unavailable (they fail with "Failed to create espresso
@@ -154,6 +182,16 @@ actor MomentCurator {
         guard !assets.isEmpty else { return [] }
         loadScoresIfNeeded()
 
+        // A day curated on any previous launch replays instantly. Without this
+        // every cold start re-ran the whole Vision pass, and the grid showed
+        // every file for the second or so that took before collapsing.
+        let print = Self.fingerprint(of: assets)
+        if let cached = dayCache[dayKey], cached.fingerprint == print,
+           let replayed = Self.rebuild(cached, from: assets) {
+            visionAvailable = cached.visionBacked
+            return replayed
+        }
+
         if printsDayKey != dayKey {
             prints.removeAll(keepingCapacity: true)
             printsDayKey = dayKey
@@ -161,8 +199,69 @@ actor MomentCurator {
 
         await ensureScored(assets)
         let grouped = group(assets)
+        remember(grouped, for: dayKey, fingerprint: print)
         persistScores()
         return grouped
+    }
+
+    /// Cheap identity for a day's asset set: if a photo is added, removed or
+    /// edited, this changes.
+    private nonisolated static func fingerprint(of assets: [PHAsset]) -> String {
+        // FNV-1a, deliberately not `Hasher`. Swift seeds `Hasher` randomly per
+        // process, so `finalize()` returns a different value every launch for
+        // identical input — a fingerprint built on it never matches across
+        // launches, the cache never hits, and this whole mechanism silently
+        // does nothing. Verified on device: two launches, same day, same
+        // photos, two different values.
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        func feed(_ text: String) {
+            for byte in text.utf8 {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x0000_0100_0000_01b3
+            }
+        }
+        feed(String(assets.count))
+        for asset in assets {
+            feed(asset.localIdentifier)
+            feed(String(AssetScore.stamp(for: asset)))
+        }
+        return String(hash, radix: 16)
+    }
+
+    /// Turn a cached grouping back into `Moment`s using the assets already in
+    /// hand — no PhotoKit round trip. Returns nil if anything referenced has
+    /// gone, in which case the day is recomputed.
+    private nonisolated static func rebuild(_ cached: CachedDay, from assets: [PHAsset]) -> [Moment]? {
+        let byID = Dictionary(assets.map { ($0.localIdentifier, $0) }, uniquingKeysWith: { a, _ in a })
+        var out: [Moment] = []
+        out.reserveCapacity(cached.moments.count)
+        for moment in cached.moments {
+            guard let pick = byID[moment.pick] else { return nil }
+            let members = moment.members.compactMap { byID[$0] }
+            guard members.count == moment.members.count else { return nil }
+            out.append(Moment(pick: pick, members: members))
+        }
+        return out
+    }
+
+    private func remember(_ moments: [Moment], for dayKey: String, fingerprint: String) {
+        dayCache[dayKey] = CachedDay(
+            fingerprint: fingerprint,
+            visionBacked: visionAvailable,
+            moments: moments.map {
+                CachedMoment(pick: $0.pick.localIdentifier,
+                             members: $0.members.map(\.localIdentifier))
+            },
+            savedAt: Date().timeIntervalSinceReferenceDate
+        )
+        // Keep it bounded — a year of browsing should not grow without limit.
+        if dayCache.count > 60 {
+            let oldest = dayCache.sorted { $0.value.savedAt < $1.value.savedAt }
+                .prefix(dayCache.count - 60)
+                .map(\.key)
+            for key in oldest { dayCache.removeValue(forKey: key) }
+        }
+        persistDayCache()
     }
 
     /// Up to `limit` frames for the daily reveal's fan: the best moment of each
@@ -409,20 +508,42 @@ actor MomentCurator {
 
     // MARK: Persistence
 
-    private static let cacheURL: URL? = {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: "group.com.ryancurran.Timefold")?
-            .appendingPathComponent("assetScores.json")
+    /// Caches live under the app group's Library/Caches, not at its root.
+    /// Both files are regenerable, so they have no business being backed up to
+    /// iCloud, and the system may reclaim them under storage pressure — which
+    /// is exactly the right behaviour for a cache.
+    private static let cacheDirectory: URL? = {
+        guard let group = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.com.ryancurran.Timefold")
+        else { return nil }
+        let dir = group.appendingPathComponent("Library/Caches", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }()
+
+    private static let cacheURL: URL? = cacheDirectory?.appendingPathComponent("assetScores.json")
+
+    private static let dayCacheURL: URL? = cacheDirectory?.appendingPathComponent("dayMoments.json")
 
     private func loadScoresIfNeeded() {
         guard !loadedFromDisk else { return }
         loadedFromDisk = true
-        guard let url = Self.cacheURL,
-              let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode([String: AssetScore].self, from: data)
-        else { return }
-        scores = decoded
+        if let url = Self.cacheURL,
+           let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode([String: AssetScore].self, from: data) {
+            scores = decoded
+        }
+        if let url = Self.dayCacheURL,
+           let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode([String: CachedDay].self, from: data) {
+            dayCache = decoded
+        }
+    }
+
+    private func persistDayCache() {
+        guard let url = Self.dayCacheURL,
+              let data = try? JSONEncoder().encode(dayCache) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 
     private func persistScores() {
@@ -439,7 +560,9 @@ actor MomentCurator {
         attempted = []
         visionAvailable = true
         loadedFromDisk = false
+        dayCache = [:]
         if let url = Self.cacheURL { try? FileManager.default.removeItem(at: url) }
+        if let url = Self.dayCacheURL { try? FileManager.default.removeItem(at: url) }
     }
 }
 

@@ -182,6 +182,9 @@ struct ContentView: View {
     /// "Best of" — one cell per moment instead of one per file. See MomentCuration.swift.
     @AppStorage("bestOfMode") private var bestOf = false
     @State private var moments: [Moment] = []
+    /// Curated fan for the daily reveal. Empty until curation lands, at which
+    /// point DailyRevealView falls back to the old prefix(5).
+    @State private var revealFan: [PHAsset] = []
     @State private var momentsAreTrustworthy = false
 
     private var isCompact: Bool {
@@ -297,7 +300,14 @@ struct ContentView: View {
             switch newState {
             case .loaded:
                 if shouldShowReveal() {
-                    showingReveal = true
+                    // Curate before raising the reveal, so its fan is the five
+                    // best moments rather than the five newest files. The app
+                    // is still on the branded loading screen here, and a warm
+                    // pass costs under a millisecond.
+                    Task {
+                        await curate()
+                        showingReveal = true
+                    }
                 } else {
                     promptNotificationsIfNeeded()
                 }
@@ -309,7 +319,7 @@ struct ContentView: View {
         }
         .overlay {
             if showingReveal, case .loaded(let assets) = model.state {
-                DailyRevealView(assets: assets, date: selectedDate) {
+                DailyRevealView(assets: assets, fan: revealFan, date: selectedDate) {
                     markRevealShown()
                     withAnimation(.easeInOut(duration: 0.55)) {
                         showingReveal = false
@@ -535,8 +545,11 @@ struct ContentView: View {
         let result = await MomentCurator.shared.moments(
             for: assets, dayKey: MomentCurator.dayKey(for: selectedDate))
         let trustworthy = await MomentCurator.shared.visionAvailable
+        let fan = await MomentCurator.shared.revealFan(
+            for: assets, dayKey: MomentCurator.dayKey(for: selectedDate))
         moments = result
         momentsAreTrustworthy = trustworthy
+        revealFan = fan
     }
 
     /// What the grid should actually show.
@@ -2169,7 +2182,7 @@ final class MemoriesViewModel: ObservableObject {
                 self.state = assets.isEmpty ? .empty : .loaded(assets)
             }
             if !assets.isEmpty {
-                Self.updateWidget(count: assets.count, sampleFrom: assets)
+                await Self.updateWidget(count: assets.count, sampleFrom: assets)
             }
         }
     }
@@ -2185,7 +2198,7 @@ final class MemoriesViewModel: ObservableObject {
         if !assets.isEmpty {
             let snapshot = assets
             Task.detached(priority: .utility) {
-                Self.updateWidget(count: snapshot.count, sampleFrom: snapshot)
+                await Self.updateWidget(count: snapshot.count, sampleFrom: snapshot)
             }
         }
     }
@@ -2195,7 +2208,7 @@ final class MemoriesViewModel: ObservableObject {
     /// launch — a guaranteed hitch. Now: count is always cheap to write; the
     /// thumbnail regenerates at most once per day; timelines reload only
     /// when something actually changed.
-    nonisolated private static func updateWidget(count: Int, sampleFrom assets: [PHAsset]) {
+    nonisolated private static func updateWidget(count: Int, sampleFrom assets: [PHAsset]) async {
         let ud = UserDefaults.standard
         let lastCount = ud.integer(forKey: "widgetLastCount")
         let today = Calendar.current.startOfDay(for: Date())
@@ -2205,9 +2218,20 @@ final class MemoriesViewModel: ObservableObject {
         guard needsThumb || count != lastCount else { return }
 
         SharedMemoriesManager.shared.saveMemoryCount(count)
-        if needsThumb, let sample = assets.randomElement() {
-            SharedMemoriesManager.shared.saveWidgetThumbnail(from: sample)
-            ud.set(today, forKey: "widgetThumbDay")
+        if needsThumb {
+            // The widget used to show assets.randomElement() — a coin flip
+            // between the day's best photograph and a screenshot. Ask the
+            // curator for the best frame of the best moment instead, and fall
+            // back to the old behaviour only if curation has nothing to say.
+            let sample = await MomentCurator.shared.bestAsset(
+                in: assets, dayKey: MomentCurator.dayKey(for: Date())
+            ) ?? assets.randomElement()
+            // Only stamp the day as done if the thumbnail actually landed.
+            // Writing it unconditionally meant one failed fetch (an asset not
+            // yet downloaded from iCloud) pinned yesterday's photo for a day.
+            if let sample, SharedMemoriesManager.shared.saveWidgetThumbnail(from: sample) {
+                ud.set(today, forKey: "widgetThumbDay")
+            }
         }
         ud.set(count, forKey: "widgetLastCount")
         WidgetCenter.shared.reloadAllTimelines()
@@ -3023,6 +3047,9 @@ struct HatGlyph: View {
 
 private struct DailyRevealView: View {
     let assets: [PHAsset]
+    /// Curated frames to deal, best moment of each year. Empty means curation
+    /// was unavailable, and the old newest-first behaviour stands in.
+    var fan: [PHAsset] = []
     let date: Date
     let onComplete: () -> Void
     /// Precomputed at init. This walks every asset in the day, and it used to
@@ -3031,8 +3058,9 @@ private struct DailyRevealView: View {
     /// a dropped frame is most visible.
     private let yearSpan: Int
 
-    init(assets: [PHAsset], date: Date, onComplete: @escaping () -> Void) {
+    init(assets: [PHAsset], fan: [PHAsset] = [], date: Date, onComplete: @escaping () -> Void) {
         self.assets = assets
+        self.fan = fan
         self.date = date
         self.onComplete = onComplete
         let calendar = Calendar.current
@@ -3065,7 +3093,9 @@ private struct DailyRevealView: View {
     private var count: Int { assets.count }
     private var mood: SpriteMood { SpriteMood.forCount(count) }
 
-    private var fanAssets: [PHAsset] { Array(assets.prefix(5)) }
+    private var fanAssets: [PHAsset] {
+        fan.isEmpty ? Array(assets.prefix(5)) : Array(fan.prefix(5))
+    }
 
     private var metaString: String {
         Fmt.weekdayMonthDay.string(from: date).uppercased()

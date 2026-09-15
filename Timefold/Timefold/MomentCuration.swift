@@ -165,6 +165,40 @@ actor MomentCurator {
         return grouped
     }
 
+    /// Up to `limit` frames for the daily reveal's fan: the best moment of each
+    /// year, most recent year first.
+    ///
+    /// The reveal used to fan `assets.prefix(5)`, and assets sort by
+    /// creationDate descending — so it always dealt five files from the most
+    /// recent year, often five frames of the same thirty seconds. On one real
+    /// day that meant opening the app with three photographs of a flat tyre.
+    func revealFan(for assets: [PHAsset], dayKey: String, limit: Int = 5) async -> [PHAsset] {
+        let moments = await moments(for: assets, dayKey: dayKey)
+        guard !moments.isEmpty else { return Array(assets.prefix(limit)) }
+
+        let calendar = Calendar.current
+        var bestByYear: [Int: Moment] = [:]
+        for moment in moments {
+            guard let date = moment.date else { continue }
+            let year = calendar.component(.year, from: date)
+            if let held = bestByYear[year], rank(of: held.pick) >= rank(of: moment.pick) { continue }
+            bestByYear[year] = moment
+        }
+
+        // Newest year first, matching the order the rest of the app reads in.
+        var fan = bestByYear.keys.sorted(by: >).compactMap { bestByYear[$0]?.pick }
+
+        // Short on years? Fill from the strongest moments not already in.
+        if fan.count < limit {
+            let taken = Set(fan.map(\.localIdentifier))
+            let rest = moments.map(\.pick)
+                .filter { !taken.contains($0.localIdentifier) }
+                .sorted { rank(of: $0) > rank(of: $1) }
+            fan.append(contentsOf: rest.prefix(limit - fan.count))
+        }
+        return Array(fan.prefix(limit))
+    }
+
     /// The single best frame of a day — what the widget wants.
     func bestAsset(in assets: [PHAsset], dayKey: String) async -> PHAsset? {
         let moments = await moments(for: assets, dayKey: dayKey)

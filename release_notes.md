@@ -19,7 +19,7 @@ Your photos stay yours.
 
 ---
 
-## v2.1 (build 61) — What's New
+## v2.1 (build 62) — What's New
 
 Your day, without the duplicates.
 

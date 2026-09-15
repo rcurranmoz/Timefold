@@ -5,6 +5,7 @@ import UIKit
 import UserNotifications
 import WidgetKit
 import AVKit
+import CoreImage
 
 // MARK: - Theme
 // Single source of truth for Latent's visual identity: warm, tactile,
@@ -75,6 +76,33 @@ enum Theme {
     }
 }
 
+/// Date formatters cost roughly 50µs each to build, and these were being
+/// allocated *inside view bodies* that re-evaluate on every animation beat —
+/// the daily reveal alone rebuilt one a dozen times per opening. Built once,
+/// never mutated afterwards, which also makes them safe to read from any
+/// thread.
+/// Marked `nonisolated` because the share-card renderer formats dates from a
+/// detached task; `DateFormatter` is safe to read from any thread as long as
+/// nobody mutates it, and nothing does after `fixed(_:)` returns.
+enum Fmt {
+    nonisolated static let weekday          = fixed("EEEE")
+    nonisolated static let monthDay         = fixed("MMMM d")
+    nonisolated static let weekdayMonthDay  = fixed("EEEE · MMMM d")
+    nonisolated static let mediumDate       = fixed("MMM d, yyyy")
+    nonisolated static let longDate         = fixed("MMMM d, yyyy")
+
+    nonisolated private static func fixed(_ format: String) -> DateFormatter {
+        let f = DateFormatter()
+        f.dateFormat = format
+        return f
+    }
+}
+
+/// One GPU-backed context for the whole app. Building a `CIContext` per call
+/// is one of the most expensive things you can do in Core Image.
+/// `CIContext` is documented as thread-safe.
+nonisolated let sharedCIContext = CIContext(options: [.useSoftwareRenderer: false])
+
 extension Font {
     /// Serif face for dates & headlines — the "memory" voice.
     static func latentSerif(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
@@ -128,37 +156,15 @@ struct ShimmerView: View {
     }
 }
 
-// MARK: - Hero zoom transition (iOS 18+, graceful no-op on iOS 17)
-private struct HeroSource: ViewModifier {
-    let id: String
-    let ns: Namespace.ID
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.matchedTransitionSource(id: id, in: ns)
-        } else {
-            content
-        }
-    }
-}
-
-private struct HeroDestination: ViewModifier {
-    let id: String
-    let ns: Namespace.ID
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.navigationTransition(.zoom(sourceID: id, in: ns))
-        } else {
-            content
-        }
-    }
-}
-
+// MARK: - Hero zoom transition
+// Both modifiers are iOS 18+; the deployment target is well past that, so
+// there is no fallback branch to carry.
 extension View {
     func heroSource(_ id: String, _ ns: Namespace.ID) -> some View {
-        modifier(HeroSource(id: id, ns: ns))
+        matchedTransitionSource(id: id, in: ns)
     }
     func heroDestination(_ id: String, _ ns: Namespace.ID) -> some View {
-        modifier(HeroDestination(id: id, ns: ns))
+        navigationTransition(.zoom(sourceID: id, in: ns))
     }
 }
 
@@ -172,6 +178,19 @@ struct ContentView: View {
     @State private var selectedAssets: Set<String> = []
     @State private var showingDeleteConfirmation = false
     @State private var showingReveal = false
+
+    /// "Best of" — one cell per moment instead of one per file. See MomentCuration.swift.
+    @AppStorage("bestOfMode") private var bestOf = false
+    @State private var moments: [Moment] = []
+    /// Curated fan for the daily reveal. Empty until curation lands, at which
+    /// point DailyRevealView falls back to the old prefix(5).
+    @State private var revealFan: [PHAsset] = []
+    @State private var momentsAreTrustworthy = false
+    /// Which release's "what's new" this person has already seen. Empty for
+    /// anyone who has never seen one — including brand-new installs, which is
+    /// what makes this the introduction to Best of as well as the upgrade note.
+    @AppStorage("seenWhatsNewVersion") private var seenWhatsNewVersion = ""
+    @State private var showingWhatsNew = false
 
     private var isCompact: Bool {
         (UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.screen.bounds.width ?? 375) < 375
@@ -208,7 +227,8 @@ struct ContentView: View {
 
                 case .loaded(let assets):
                     MemoriesGridView(
-                        assets: assets,
+                        assets: displayed(assets),
+                        stacks: stacks,
                         isRevealActive: showingReveal,
                         onRefresh: { await model.reloadQuietly(for: selectedDate) },
                         isSelecting: $isSelecting,
@@ -243,6 +263,9 @@ struct ContentView: View {
             VisitTracker.recordVisit()
             model.start()
         }
+        .task(id: curationToken) {
+            await curate()
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Refresh on foreground only when the day rolled or the data is
             // stale — hopping between apps shouldn't reload every time.
@@ -253,6 +276,28 @@ struct ContentView: View {
             // Reload when system time/date changes (like manual date change)
             selectedDate = Date()
             model.loadMemoriesFor(date: Date())
+        }
+        .sheet(isPresented: $showingWhatsNew, onDismiss: {
+            promptNotificationsIfNeeded()
+        }) {
+            WhatsNewView(
+                momentCount: moments.count,
+                assetCount: totalAssetCount,
+                onEnable: {
+                    bestOf = true
+                    seenWhatsNewVersion = Self.whatsNewVersion
+                    showingWhatsNew = false
+                },
+                onDismiss: {
+                    seenWhatsNewVersion = Self.whatsNewVersion
+                    showingWhatsNew = false
+                }
+            )
+            // A fixed height, not a fraction: the content is a known size, and a
+            // fraction leaves a lake of empty space on a large phone while
+            // crowding a small one.
+            .presentationDetents([.height(530)])
+            .presentationDragIndicator(.hidden)
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView(notificationManager: notificationManager)
@@ -282,9 +327,22 @@ struct ContentView: View {
             switch newState {
             case .loaded:
                 if shouldShowReveal() {
-                    showingReveal = true
+                    // Curate before raising the reveal, so its fan is the five
+                    // best moments rather than the five newest files. The app
+                    // is still on the branded loading screen here, and a warm
+                    // pass costs under a millisecond.
+                    Task {
+                        await curate()
+                        showingReveal = true
+                    }
                 } else {
-                    promptNotificationsIfNeeded()
+                    // Curation has to land before we can know whether Best of
+                    // is worth pitching — presentFollowUps() reads
+                    // canShowBestOf, which is false until the pass completes.
+                    Task {
+                        await curate()
+                        presentFollowUps()
+                    }
                 }
             case .empty:
                 promptNotificationsIfNeeded()
@@ -294,7 +352,7 @@ struct ContentView: View {
         }
         .overlay {
             if showingReveal, case .loaded(let assets) = model.state {
-                DailyRevealView(assets: assets, date: selectedDate) {
+                DailyRevealView(assets: assets, fan: revealFan, date: selectedDate) {
                     markRevealShown()
                     withAnimation(.easeInOut(duration: 0.55)) {
                         showingReveal = false
@@ -302,7 +360,7 @@ struct ContentView: View {
                     // First launch only: once the reveal has landed, ask about
                     // the daily reminder — after the moment, never during it.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                        promptNotificationsIfNeeded()
+                        presentFollowUps()
                     }
                 }
                 .ignoresSafeArea()
@@ -313,8 +371,7 @@ struct ContentView: View {
 
     /// Uppercased weekday plus a live summary of what's on screen.
     private var mastheadMeta: String {
-        let f = DateFormatter(); f.dateFormat = "EEEE"
-        let weekday = f.string(from: selectedDate).uppercased()
+        let weekday = Fmt.weekday.string(from: selectedDate).uppercased()
         switch model.state {
         case .loaded(let assets):
             if isSelecting {
@@ -322,8 +379,14 @@ struct ContentView: View {
                     ? "SELECT MEMORIES TO DELETE"
                     : "\(selectedAssets.count) SELECTED"
             }
-            let mem = assets.count == 1 ? "1 MEMORY" : "\(assets.count) MEMORIES"
-            let years = Set(assets.compactMap { $0.creationDate }.map {
+            let shown = displayed(assets)
+            let mem: String
+            if bestOf, canShowBestOf {
+                mem = shown.count == 1 ? "1 MOMENT" : "\(shown.count) MOMENTS"
+            } else {
+                mem = assets.count == 1 ? "1 MEMORY" : "\(assets.count) MEMORIES"
+            }
+            let years = Set(shown.compactMap { $0.creationDate }.map {
                 Calendar.current.component(.year, from: $0)
             }).count
             return years > 1 ? "\(weekday) · \(mem) · ACROSS \(years) YEARS" : "\(weekday) · \(mem)"
@@ -447,6 +510,27 @@ struct ContentView: View {
         }
     }
 
+    /// The release this build wants to introduce. Bump alongside a feature
+    /// worth a note; anyone whose stored value differs sees it once.
+    private static let whatsNewVersion = "2.1"
+
+    /// After the reveal has landed (or when there was none): introduce the
+    /// feature if it is new to this person, and only then ask about
+    /// notifications. Never both at once.
+    private func presentFollowUps() {
+        guard !showingWhatsNew else { return }
+        // Only pitch Best of when it would actually do something here — the
+        // day has duplicates to collapse and Vision really ran.
+        // Don't pitch "Turn it on" at someone who already has. Nobody upgrading
+        // to 2.1 will, but the flag is user-settable and the copy is wrong if so.
+        let worthShowing = canShowBestOf && !bestOf && moments.count < totalAssetCount
+        if seenWhatsNewVersion != Self.whatsNewVersion, worthShowing {
+            showingWhatsNew = true
+        } else {
+            promptNotificationsIfNeeded()
+        }
+    }
+
     /// One-shot, first-session notification ask. If granted, the daily
     /// reminder turns itself on with sensible defaults (9 AM, 3+ photos) —
     /// permission without a scheduled reminder would be a no-op.
@@ -467,14 +551,60 @@ struct ContentView: View {
         #endif
     }
 
+    /// Re-curate when the day changes or the asset set changes size.
+    private var curationToken: String {
+        guard case .loaded(let assets) = model.state else { return "none" }
+        return "\(MomentCurator.dayKey(for: selectedDate))-\(assets.count)"
+    }
+
+    private func curate() async {
+        guard case .loaded(let assets) = model.state else {
+            moments = []
+            momentsAreTrustworthy = false
+            return
+        }
+        let result = await MomentCurator.shared.moments(
+            for: assets, dayKey: MomentCurator.dayKey(for: selectedDate))
+        let trustworthy = await MomentCurator.shared.visionAvailable
+        let fan = await MomentCurator.shared.revealFan(
+            for: assets, dayKey: MomentCurator.dayKey(for: selectedDate))
+        moments = result
+        momentsAreTrustworthy = trustworthy
+        revealFan = fan
+    }
+
+    /// What the grid should actually show.
+    private func displayed(_ assets: [PHAsset]) -> [PHAsset] {
+        guard bestOf, canShowBestOf else { return assets }
+        return moments.map(\.pick)
+    }
+
+    /// pick localIdentifier -> every frame of that moment. Drives the grid
+    /// badge, the pager's indicator, and the filmstrip behind it.
+    private var stacks: [String: [PHAsset]] {
+        guard bestOf, canShowBestOf else { return [:] }
+        return Dictionary(uniqueKeysWithValues:
+            moments.filter(\.isStack).map { ($0.pick.localIdentifier, $0.members) })
+    }
+
+    /// Only offer the toggle once curation has produced something we believe.
+    /// Without Vision the moment count is a floor, not an answer — see
+    /// `MomentCurator.visionAvailable`.
+    private var totalAssetCount: Int {
+        if case .loaded(let assets) = model.state { return assets.count }
+        return 0
+    }
+
+    private var canShowBestOf: Bool {
+        momentsAreTrustworthy && !moments.isEmpty
+    }
+
     private func markRevealShown() {
         UserDefaults.standard.set(Date(), forKey: "lastRevealDate")
     }
 
     private func formatDateString(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMMM d"
-        return formatter.string(from: date)
+        Fmt.monthDay.string(from: date)
     }
     
     private func deleteSelectedPhotos(from assets: [PHAsset]) {
@@ -497,6 +627,149 @@ struct ContentView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - What's New
+
+/// Introduces a release's headline feature, once. Doubles as the onboarding for
+/// Best of: the app has no onboarding flow beyond the permission screen, so a
+/// brand-new install meets this the same way an upgrading one does.
+private struct WhatsNewView: View {
+    let momentCount: Int
+    let assetCount: Int
+    let onEnable: () -> Void
+    let onDismiss: () -> Void
+
+    @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
+    @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
+    @State private var appeared = false
+
+    private var ink: Color { Theme.skyInk() }
+    private var inkSoft: Color { Theme.skyInkSoft() }
+    private var kind: MascotKind { MascotKind(rawValue: mascotRaw) ?? .foldy }
+    private var hat: HatKind { HatKind(rawValue: hatRaw) ?? .none }
+
+    /// Pitch it with this person's own numbers rather than a generic blurb —
+    /// "76 today, really 51 things" lands harder than "hides duplicates".
+    private var pitch: String {
+        let hidden = max(0, assetCount - momentCount)
+        guard hidden > 0 else {
+            return "Latent can tuck near-identical shots behind a single card, so a day reads as moments instead of files."
+        }
+        return "Today you have \(assetCount) photos — but really about \(momentCount) things that happened. Latent can tuck the \(hidden) near-identical shots behind a single card, and show you the best one."
+    }
+
+    var body: some View {
+        ZStack {
+            Theme.sky().ignoresSafeArea()
+            SunGlow()
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 4)
+
+                Text("NEW")
+                    .metaLabel(11, color: Theme.pink)
+                    .padding(.bottom, 10)
+
+                Text("Best of")
+                    .font(.latentSerif(38))
+                    .foregroundStyle(ink)
+
+                // A stack of cards, which is the idea in one picture.
+                ZStack {
+                    // Three cards fanned behind one, with the same badge the
+                    // grid uses — so the idiom is learned here, not discovered.
+                    ForEach(0..<3, id: \.self) { i in
+                        let depth = Double(2 - i)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Theme.mat)
+                            .frame(width: 92, height: 92)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(Theme.ink.opacity(0.07), lineWidth: 1)
+                            }
+                            .shadow(color: .black.opacity(0.14), radius: 7, y: 4)
+                            .rotationEffect(.degrees(depth * -11))
+                            .offset(x: depth * -17, y: depth * -3)
+                            .opacity(i == 2 ? 1 : 0.7)
+                    }
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Theme.brandGradient.opacity(0.14))
+                        .frame(width: 92, height: 92)
+                        .overlay(alignment: .bottomTrailing) {
+                            HStack(spacing: 2) {
+                                Image(systemName: "square.stack.3d.up.fill")
+                                    .font(.system(size: 8, weight: .semibold))
+                                Text("4")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(.black.opacity(0.45)))
+                            .padding(6)
+                        }
+                }
+                .frame(height: 118)
+                .scaleEffect(appeared ? 1 : 0.9)
+                .opacity(appeared ? 1 : 0)
+
+                Text(pitch)
+                    .font(.latentRounded(15, weight: .regular))
+                    .foregroundStyle(inkSoft)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .padding(.horizontal, 32)
+
+                HStack(spacing: 8) {
+                    TimeSprite(mood: .happy, kind: kind, hat: hat)
+                        .scaleEffect(0.20)
+                        .frame(width: 40, height: 44)
+                    Text("nothing gets deleted, promise")
+                        .font(.latentRounded(12, weight: .medium))
+                        .foregroundStyle(inkSoft.opacity(0.85))
+                }
+                .padding(.top, 12)
+
+                Spacer(minLength: 4)
+
+                VStack(spacing: 10) {
+                    Button(action: onEnable) {
+                        Text("Turn it on")
+                            .font(.latentRounded(17, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                            .background(Theme.brandGradient, in: Capsule())
+                            .shadow(color: Theme.pink.opacity(0.3), radius: 12, y: 5)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onDismiss) {
+                        Text("Not now")
+                            .font(.latentRounded(14, weight: .medium))
+                            .foregroundStyle(inkSoft)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 28)
+
+                Text("You can change this any time in Settings.")
+                    .font(.latentRounded(11, weight: .regular))
+                    .foregroundStyle(inkSoft.opacity(0.7))
+                    .padding(.top, 4)
+                    .padding(.bottom, 10)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78).delay(0.1)) {
+                appeared = true
+            }
+        }
+        .interactiveDismissDisabled()
     }
 }
 
@@ -763,7 +1036,7 @@ private struct EmptyMemoriesView: View {
     @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
 
     private var dateString: String {
-        let f = DateFormatter(); f.dateFormat = "MMMM d"; return f.string(from: date)
+        Fmt.monthDay.string(from: date)
     }
 
     var body: some View {
@@ -852,8 +1125,80 @@ private struct DeniedAccessView: View {
     }
 }
 
+/// Scroll-derived chrome — the big floating year. It lives in a reference
+/// type held by a plain `@State` so that *only the badge* subscribes to it.
+/// When these two values were `@State` on `MemoriesGridView`, every year tick
+/// and every scroll start/stop invalidated the whole grid body, which meant
+/// re-running `Array(assets.enumerated())` — a fresh array of every asset in
+/// the day — several times a second while the user's finger was moving.
+@MainActor
+final class ScrollChromeModel: ObservableObject {
+    @Published private(set) var year: Int?
+    @Published private(set) var isScrolling = false
+
+    private var lastYearChange: Date = .distantPast
+    private var hideTask: Task<Void, Never>?
+
+    func update(index: Int, assets: [PHAsset]) {
+        guard index >= 0, index < assets.count,
+              let assetDate = assets[index].creationDate else { return }
+        let newYear = Calendar.current.component(.year, from: assetDate)
+
+        // Throttle the year *value* to one change per 0.3s — but never skip the
+        // hide-timer reschedule below. Scrolling fast through a day that spans
+        // many years throttles almost every update, and an early return here
+        // left an older 800ms timer to fire and fade the badge out with the
+        // user's finger still down.
+        if year != newYear, Date().timeIntervalSince(lastYearChange) > 0.3 {
+            lastYearChange = Date()
+            withAnimation(.easeInOut(duration: 0.2)) {
+                year = newYear
+                isScrolling = true
+            }
+        } else if !isScrolling {
+            withAnimation(.easeInOut(duration: 0.2)) { isScrolling = true }
+        }
+
+        hideTask?.cancel()
+        hideTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled, let self else { return }
+            withAnimation(.easeOut(duration: 0.3)) { self.isScrolling = false }
+        }
+    }
+
+    func reset() {
+        hideTask?.cancel()
+        year = nil
+        isScrolling = false
+    }
+}
+
+private struct YearBadge: View {
+    @ObservedObject var model: ScrollChromeModel
+
+    var body: some View {
+        VStack {
+            Spacer()
+            if let year = model.year {
+                Text(String(year))
+                    .font(.latentSerif(84))
+                    .foregroundStyle(.primary.opacity(0.32))
+                    .shadow(color: Color(uiColor: .systemBackground).opacity(0.6), radius: 12)
+            }
+            Spacer()
+        }
+        .allowsHitTesting(false)
+        .opacity(model.isScrolling ? 1.0 : 0.0)
+        .animation(.easeIn(duration: 0.6), value: model.isScrolling)
+    }
+}
+
 private struct MemoriesGridView: View {
     let assets: [PHAsset]
+    /// localIdentifier -> every frame of that moment, when "Best of" is on.
+    /// Empty otherwise.
+    var stacks: [String: [PHAsset]] = [:]
     var isRevealActive: Bool = false
     var onRefresh: (() async -> Void)? = nil
     @Binding var isSelecting: Bool
@@ -886,30 +1231,20 @@ private struct MemoriesGridView: View {
     }
 
     @Namespace private var heroNS
+    @Environment(\.displayScale) private var displayScale
     @State private var entered = false
     @State private var deletedAssets: Set<String> = []
-    @State private var isScrolling = false
-    @State private var currentYear: Int?
-    @State private var hideYearTask: Task<Void, Never>?
-    @State private var lastYearChangeTime: Date = .distantPast
+    /// Reference type in plain `@State`: the grid holds it, but does not
+    /// observe it. See `ScrollChromeModel`.
+    @State private var scrollChrome = ScrollChromeModel()
 
     var body: some View {
         ZStack {
             gridContent
-            
+
             // Year badge overlay (only when scrolling)
-            if showFloatingYear, let year = currentYear {
-                VStack {
-                    Spacer()
-                    Text(String(year))
-                        .font(.latentSerif(84))
-                        .foregroundStyle(.primary.opacity(0.32))
-                        .shadow(color: Color(uiColor: .systemBackground).opacity(0.6), radius: 12)
-                    Spacer()
-                }
-                .allowsHitTesting(false)
-                .opacity(isScrolling ? 1.0 : 0.0)
-                .animation(.easeIn(duration: 0.6), value: isScrolling)
+            if showFloatingYear {
+                YearBadge(model: scrollChrome)
             }
             
             // Selection mode toolbar at bottom
@@ -938,6 +1273,9 @@ private struct MemoriesGridView: View {
     private var gridContent: some View {
         GeometryReader { geo in
             let cell = (geo.size.width - spacing * 2) / 3
+            // Ask PhotoKit for exactly the pixels this screen will show.
+            let thumbPixels = CGSize(width: (cell * displayScale).rounded(),
+                                     height: (cell * displayScale).rounded())
 
             ScrollView {
                 LazyVGrid(columns: columns, spacing: spacing) {
@@ -947,8 +1285,11 @@ private struct MemoriesGridView: View {
                                 assets: assets,
                                 asset: asset,
                                 cellSize: cell,
+                                thumbnailSize: thumbPixels,
                                 isSelecting: isSelecting,
                                 isSelected: selectedAssets.contains(asset.localIdentifier),
+                                stackCount: stacks[asset.localIdentifier]?.count ?? 0,
+                                stacks: stacks,
                                 namespace: heroNS,
                                 onToggleSelection: { toggleSelection(for: asset) },
                                 onDelete: { deletePhoto(asset: asset) }
@@ -982,53 +1323,34 @@ private struct MemoriesGridView: View {
                 geo.contentOffset.y + geo.contentInsets.top
             } action: { old, new in
                 guard abs(new - old) > 2 else { return }
-                updateYear(forOffset: new, cellSize: cell)
+                // Which row is passing ~130pt below the masthead right now?
+                let row = max(0, Int((new + 130) / (cell + spacing)))
+                let index = min(max(0, row * 3), max(0, assets.count - 1))
+                scrollChrome.update(index: index, assets: assets)
+                // Decode the next screenful before the user gets there.
+                ThumbnailPrefetcher.shared.update(center: index)
             }
             .scrollIndicators(.hidden)
             .refreshable { await onRefresh?() }
             .ignoresSafeArea(edges: .bottom)
+            .task(id: assets.count) {
+                ThumbnailPrefetcher.shared.reset(assets: assets, targetSize: thumbPixels)
+            }
+            .onDisappear {
+                // Deliberately *not* dropping the thumbnail cache here.
+                // Pushing a photo fires the grid's onDisappear, and coming
+                // straight back to the grid is the single most likely next
+                // move — throwing the warm cache away at exactly that moment
+                // would undo the prefetch. PhotoKit evicts under memory
+                // pressure on its own; `reset(assets:targetSize:)` clears it
+                // when the day being shown actually changes.
+                scrollChrome.reset()
+            }
             .onAppear {
                 if !isRevealActive { entered = true }
             }
             .onChange(of: isRevealActive) {
                 if !isRevealActive { entered = true }
-            }
-        }
-    }
-    
-    private func updateYear(forOffset offset: CGFloat, cellSize: CGFloat) {
-        // Which row is passing ~130pt below the masthead right now?
-        let row = max(0, Int((offset + 130) / (cellSize + spacing)))
-        let index = min(row * 3, assets.count - 1)
-        guard index >= 0, let assetDate = assets[index].creationDate else { return }
-        let year = Calendar.current.component(.year, from: assetDate)
-        
-        if currentYear != year {
-            // Throttle year changes - only allow changes every 0.3 seconds
-            let timeSinceLastChange = Date().timeIntervalSince(lastYearChangeTime)
-            guard timeSinceLastChange > 0.3 else { return }
-            
-            lastYearChangeTime = Date()
-            withAnimation(.easeInOut(duration: 0.2)) {
-                currentYear = year
-                isScrolling = true
-            }
-        } else if !isScrolling {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isScrolling = true
-            }
-        }
-        
-        // Cancel previous hide task and schedule new one
-        hideYearTask?.cancel()
-        hideYearTask = Task {
-            try? await Task.sleep(nanoseconds: 800_000_000) // 0.8 seconds
-            if !Task.isCancelled {
-                await MainActor.run {
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        isScrolling = false
-                    }
-                }
             }
         }
     }
@@ -1082,8 +1404,13 @@ private struct GridCellView: View {
     let assets: [PHAsset]
     let asset: PHAsset
     let cellSize: CGFloat
+    let thumbnailSize: CGSize
     let isSelecting: Bool
     let isSelected: Bool
+    /// Frames hidden behind this one in "Best of". 0 when it stands alone.
+    var stackCount: Int = 0
+    /// Forwarded to the pager so it can say the same thing full-screen.
+    var stacks: [String: [PHAsset]] = [:]
     let namespace: Namespace.ID
     let onToggleSelection: () -> Void
     let onDelete: () -> Void
@@ -1101,7 +1428,7 @@ private struct GridCellView: View {
             } else {
                 // In normal mode, use NavigationLink
                 NavigationLink {
-                    MemoryPagerView(assets: assets, startAsset: asset)
+                    MemoryPagerView(assets: assets, startAsset: asset, stacks: stacks)
                         .heroDestination(asset.localIdentifier, namespace)
                 } label: {
                     cellContent
@@ -1146,10 +1473,32 @@ private struct GridCellView: View {
 
     private var cellContent: some View {
         ZStack {
-            AssetThumbnailView(asset: asset)
+            AssetThumbnailView(asset: asset, targetSize: thumbnailSize)
                 .frame(width: cellSize, height: cellSize)
                 .clipped()
                 .opacity(isSelecting && !isSelected ? 0.6 : 1.0)
+
+            // "N more like this" — the frames this pick stands in for.
+            if stackCount > 1 {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        HStack(spacing: 2) {
+                            Image(systemName: "square.stack.3d.up.fill")
+                                .font(.system(size: 8, weight: .semibold))
+                            Text("\(stackCount)")
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(.black.opacity(0.45)))
+                        .padding(5)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
 
             // Video play icon overlay
             if asset.mediaType == .video {
@@ -1184,12 +1533,93 @@ private struct GridCellView: View {
 
 /// Shared caching manager: PhotoKit keeps recently decoded grid thumbnails
 /// warm across scrolls instead of re-decoding on every pass.
-private let thumbnailManager = PHCachingImageManager()
+let thumbnailManager = PHCachingImageManager()
+
+/// One options object, shared by the prefetcher and by every cell. This is
+/// not tidiness — `PHCachingImageManager` only serves a cached rendition when
+/// the request's target size, content mode *and* options match what was
+/// cached. Two separately-built option objects miss the cache every time.
+let gridThumbnailOptions: PHImageRequestOptions = {
+    let o = PHImageRequestOptions()
+    o.deliveryMode = .opportunistic
+    o.resizeMode = .fast
+    o.isNetworkAccessAllowed = true
+    return o
+}()
+
+/// Warms PhotoKit's cache for the cells just past the bottom of the screen,
+/// so a scroll runs into images that are already decoded instead of into
+/// shimmer placeholders.
+///
+/// The app has always allocated a `PHCachingImageManager`, but never called
+/// `startCachingImages` — which is the only thing that makes it a *caching*
+/// manager. Without it, it behaved exactly like `PHImageManager.default()`.
+@MainActor
+final class ThumbnailPrefetcher {
+    static let shared = ThumbnailPrefetcher()
+
+    private var assets: [PHAsset] = []
+    private var targetSize: CGSize = .zero
+    private var warm: Range<Int> = 0..<0
+
+    /// Point the prefetcher at a new grid, dropping whatever it held before.
+    func reset(assets: [PHAsset], targetSize: CGSize) {
+        guard targetSize != .zero else { return }
+        let sameGrid = self.targetSize == targetSize
+            && self.assets.count == assets.count
+            && self.assets.first?.localIdentifier == assets.first?.localIdentifier
+            && self.assets.last?.localIdentifier == assets.last?.localIdentifier
+        guard !sameGrid else { return }
+
+        thumbnailManager.stopCachingImagesForAllAssets()
+        self.assets = assets
+        self.targetSize = targetSize
+        self.warm = 0..<0
+        update(center: 0)
+    }
+
+    /// Keep a window around `center` decoded. Weighted forward, because
+    /// people scroll down far more than they scroll back up.
+    func update(center: Int, ahead: Int = 36, behind: Int = 12) {
+        guard !assets.isEmpty, targetSize != .zero else { return }
+        let lower = max(0, center - behind)
+        let upper = min(assets.count, center + ahead)
+        let wanted = lower..<max(lower, upper)
+        guard wanted != warm else { return }
+
+        let cool = warm.filter { !wanted.contains($0) }
+        let heat = wanted.filter { !warm.contains($0) }
+        if !cool.isEmpty {
+            thumbnailManager.stopCachingImages(
+                for: cool.map { assets[$0] },
+                targetSize: targetSize, contentMode: .aspectFill,
+                options: gridThumbnailOptions
+            )
+        }
+        if !heat.isEmpty {
+            thumbnailManager.startCachingImages(
+                for: heat.map { assets[$0] },
+                targetSize: targetSize, contentMode: .aspectFill,
+                options: gridThumbnailOptions
+            )
+        }
+        warm = wanted
+    }
+
+    func stopAll() {
+        thumbnailManager.stopCachingImagesForAllAssets()
+        assets = []
+        targetSize = .zero
+        warm = 0..<0
+    }
+}
 
 private struct AssetThumbnailView: View {
     let asset: PHAsset
-    /// In pixels. Default covers a 3-column grid cell on a 3x display.
-    var targetSize: CGSize = CGSize(width: 420, height: 420)
+    /// In pixels, sized to the cell on *this* screen. The old hard-coded
+    /// 420x420 over-fetched by ~2.8x on a 2x phone and under-fetched (i.e.
+    /// rendered visibly soft) in the much larger cells on iPad.
+    var targetSize: CGSize
     @State private var image: UIImage?
     @State private var requestID: PHImageRequestID?
 
@@ -1205,7 +1635,9 @@ private struct AssetThumbnailView: View {
             }
         }
         .animation(.easeOut(duration: 0.35), value: image == nil)
-        .task {
+        // Keyed on the asset: SwiftUI recycles cells, and an un-keyed `.task`
+        // would leave a recycled cell showing the previous photo forever.
+        .task(id: asset.localIdentifier) {
             load()
         }
         .onDisappear {
@@ -1218,16 +1650,11 @@ private struct AssetThumbnailView: View {
     }
 
     private func load() {
-        let opts = PHImageRequestOptions()
-        opts.deliveryMode = .opportunistic
-        opts.resizeMode = .fast
-        opts.isNetworkAccessAllowed = true
-
         requestID = thumbnailManager.requestImage(
             for: asset,
             targetSize: targetSize,
             contentMode: .aspectFill,
-            options: opts
+            options: gridThumbnailOptions
         ) { img, _ in
             if let img {
                 DispatchQueue.main.async { self.image = img }
@@ -1239,6 +1666,8 @@ private struct AssetThumbnailView: View {
 private struct MemoryPagerView: View {
     let assets: [PHAsset]
     let startAsset: PHAsset
+    /// localIdentifier -> every frame of this moment, when "Best of" is on.
+    var stacks: [String: [PHAsset]] = [:]
     var onDismiss: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -1253,6 +1682,11 @@ private struct MemoryPagerView: View {
     @State private var opacity: Double = 1.0
     @State private var isZoomed = false
     @GestureState private var dragState: CGFloat = 0
+    /// pick localIdentifier -> the frame of that moment currently on screen.
+    /// Substituting inside the page means swiping still moves between moments
+    /// and nobody loses their place.
+    @State private var frameOverride: [String: PHAsset] = [:]
+    @State private var showingStrip = false
     
     enum ShareItem {
         case image(UIImage)
@@ -1260,16 +1694,41 @@ private struct MemoryPagerView: View {
     }
     
     private var currentImage: UIImage? {
-        guard let asset = assets[safe: selection] else { return nil }
+        guard let asset = currentAsset else { return nil }
         return loadedImages[asset.localIdentifier]
     }
-    
+
     private var currentAsset: PHAsset? {
-        assets[safe: selection]
+        assets[safe: selection].map { displayed($0) }
     }
 
     private var currentAssetIsVideo: Bool {
-        assets[safe: selection]?.mediaType == .video
+        currentAsset?.mediaType == .video
+    }
+
+    /// The pick occupying the current page — not necessarily what is on screen,
+    /// since the filmstrip can substitute another frame of the same moment.
+    private var currentPick: PHAsset? { assets[safe: selection] }
+
+    /// Every frame of the current moment.
+    private var currentStackMembers: [PHAsset] {
+        guard let id = currentPick?.localIdentifier else { return [] }
+        return stacks[id] ?? []
+    }
+
+    private var currentStackCount: Int { currentStackMembers.count }
+
+    /// Which frame of the moment is actually being shown, 1-based.
+    private var currentFrameOrdinal: Int {
+        guard let shown = currentAsset else { return 1 }
+        let i = currentStackMembers.firstIndex { $0.localIdentifier == shown.localIdentifier }
+        return (i ?? 0) + 1
+    }
+
+    /// The photo a given page should display: the substituted frame if the
+    /// filmstrip picked one, otherwise the moment's pick.
+    private func displayed(_ pick: PHAsset) -> PHAsset {
+        frameOverride[pick.localIdentifier] ?? pick
     }
 
     var body: some View {
@@ -1287,6 +1746,9 @@ private struct MemoryPagerView: View {
             .opacity(opacity)
             .onChange(of: selection) {
                 isZoomed = false
+                if showingStrip {
+                    withAnimation(.easeOut(duration: 0.2)) { showingStrip = false }
+                }
                 pruneImageCache()
             }
             .simultaneousGesture(
@@ -1342,20 +1804,57 @@ private struct MemoryPagerView: View {
                     }
             )
             
+            if showingStrip, currentStackCount > 1 {
+                momentStrip
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(2)
+            }
+
             // Year badge overlay
             VStack {
                 if let date = assets[safe: selection]?.creationDate {
-                    HStack {
-                        Spacer()
-                        Text(yearsAgoText(from: date))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
-                            .shadow(color: .black.opacity(0.25), radius: 1)
-                            .padding(.trailing)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        HStack {
+                            Spacer()
+                            Text(yearsAgoText(from: date))
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
+                                .shadow(color: .black.opacity(0.25), radius: 1)
+                        }
+                        // Becca: "I'd want an indicator when I open a duped photo
+                        // that it's duped." Without this, a photo standing in for
+                        // six others looks exactly like one that stands alone.
+                        if currentStackCount > 1 {
+                            Button {
+                                Haptics.tap(.light)
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                                    showingStrip.toggle()
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "square.stack.3d.up.fill")
+                                        .font(.system(size: 10, weight: .semibold))
+                                    Text("\(currentFrameOrdinal) of \(currentStackCount) like this")
+                                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    Image(systemName: showingStrip ? "chevron.down" : "chevron.up")
+                                        .font(.system(size: 8, weight: .bold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(.black.opacity(0.4)))
+                                .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+                                .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
+                    .padding(.trailing)
                     .padding(.top, 60)
+                    .animation(.easeOut(duration: 0.25), value: currentStackCount)
                 }
                 Spacer()
             }
@@ -1460,13 +1959,15 @@ private struct MemoryPagerView: View {
     
     /// One page of the pager, factored out to keep the type-checker happy.
     private func pagerPage(index: Int, asset: PHAsset) -> some View {
-        PagedPhotoView(
-            asset: asset,
+        let shown = displayed(asset)
+        return PagedPhotoView(
+            asset: shown,
             // Full-res bitmaps are ~20MB each; only the current page and its
             // neighbors keep theirs in memory.
             isNearSelection: abs(index - selection) <= 2,
+            prefersSharp: frameOverride[asset.localIdentifier] != nil,
             onImageReady: { img in
-                loadedImages[asset.localIdentifier] = img
+                loadedImages[shown.localIdentifier] = img
             },
             dragOffset: dragOffset,
             onZoomChanged: { isZoomed = $0 }
@@ -1474,10 +1975,81 @@ private struct MemoryPagerView: View {
         .tag(index)
     }
 
+    /// The frames of the current moment, as a strip along the bottom. Tapping
+    /// one substitutes it into the page in place, so a swipe still means "next
+    /// moment" and the reading position never moves.
+    private var momentStrip: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 8) {
+                Text("EVERY SHOT OF THIS MOMENT")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .kerning(1.4)
+                    .foregroundStyle(.white.opacity(0.7))
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(currentStackMembers, id: \.localIdentifier) { member in
+                            let isShown = currentAsset?.localIdentifier == member.localIdentifier
+                            AssetThumbnailView(
+                                asset: member,
+                                targetSize: CGSize(width: 150, height: 150)
+                            )
+                            .frame(width: 62, height: 62)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(isShown ? .white : .white.opacity(0.22),
+                                                  lineWidth: isShown ? 2.5 : 1)
+                            }
+                            .overlay(alignment: .topTrailing) {
+                                // Mark the one the app would have chosen, so the
+                                // pick is legible rather than mysterious.
+                                if member.localIdentifier == currentPick?.localIdentifier {
+                                    Image(systemName: "star.fill")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(.white)
+                                        .padding(3)
+                                        .background(Circle().fill(Theme.pink))
+                                        .offset(x: 4, y: -4)
+                                }
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .onTapGesture {
+                                guard let pick = currentPick else { return }
+                                Haptics.tap(.light)
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    if member.localIdentifier == pick.localIdentifier {
+                                        frameOverride.removeValue(forKey: pick.localIdentifier)
+                                    } else {
+                                        frameOverride[pick.localIdentifier] = member
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(height: 70)
+            }
+            .padding(.top, 10)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity)
+            // The material bleeds to the screen edge; the thumbnails must not.
+            // ignoresSafeArea on the whole strip ran them under the home
+            // indicator and clipped them.
+            .background {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .ignoresSafeArea(edges: .bottom)
+            }
+        }
+    }
+
     /// Drop cached full-res images for pages far from the current one.
     private func pruneImageCache() {
         let keep = Set(((selection - 2)...(selection + 2)).compactMap {
-            assets[safe: $0]?.localIdentifier
+            assets[safe: $0].map { displayed($0).localIdentifier }
         })
         loadedImages = loadedImages.filter { keep.contains($0.key) }
     }
@@ -1511,9 +2083,7 @@ private struct MemoryPagerView: View {
             }
         }
         
-        let df = DateFormatter()
-        df.dateFormat = "MMM d, yyyy"
-        let dateStr = df.string(from: date)
+        let dateStr = Fmt.mediumDate.string(from: date)
         
         if yearsAgo <= 0 {
             return dateStr
@@ -1540,17 +2110,26 @@ private struct MemoryPagerView: View {
 private struct PagedPhotoView: View {
     let asset: PHAsset
     var isNearSelection: Bool = true
+    /// True when this page is showing a frame the reader deliberately chose from
+    /// the moment strip. Arriving at a photo by tapping its thumbnail is a
+    /// different promise than swiping past one, and wants a sharp result rather
+    /// than a fast one.
+    var prefersSharp: Bool = false
     let onImageReady: (UIImage?) -> Void
     let dragOffset: CGFloat
     var onZoomChanged: (Bool) -> Void = { _ in }
 
     @State private var image: UIImage?
+    /// Pre-blurred, postage-stamp copy of `image` — see `ambientBackdrop`.
+    @State private var backdrop: UIImage?
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     @State private var player: AVPlayer?
     @State private var isPlaying = false
+    /// Which asset the currently-held bitmap belongs to.
+    @State private var shownIdentifier: String?
 
     var body: some View {
         GeometryReader { geo in
@@ -1664,13 +2243,30 @@ private struct PagedPhotoView: View {
             .frame(width: geo.size.width, height: geo.size.height)
             .background(ambientBackdrop)
         }
-        .task(id: isNearSelection) {
-            if isNearSelection {
-                if image == nil { await loadFull() }
-            } else if image != nil {
+        // Keyed on the asset as well as proximity: the filmstrip can swap which
+        // frame a page shows without the page moving, and an id of proximity
+        // alone would leave the previous photo on screen forever.
+        .task(id: "\(asset.localIdentifier)|\(isNearSelection)") {
+            guard isNearSelection else {
                 // TabView keeps far pages alive — don't let them each pin a
                 // full-resolution bitmap.
                 image = nil
+                backdrop = nil
+                shownIdentifier = nil
+                return
+            }
+            if shownIdentifier != asset.localIdentifier {
+                // On a deliberate pick, hold the previous frame on screen until
+                // the new one is ready: swapping to a spinner and back is worse
+                // than a beat of the old photo, and both beat showing a blur.
+                if !prefersSharp {
+                    image = nil
+                    backdrop = nil
+                }
+                shownIdentifier = asset.localIdentifier
+                await loadFull()
+            } else if image == nil {
+                await loadFull()
             }
         }
         .onDisappear {
@@ -1683,20 +2279,28 @@ private struct PagedPhotoView: View {
     
     // Ambient backdrop: a heavily blurred, darkened copy of the current photo
     // instead of a flat black void — the Apple Music / Photos full-screen feel.
+    //
+    // This used to be `.blur(radius: 60)` over a full-bleed copy of the
+    // full-resolution photo, which makes Core Animation run a 60pt Gaussian
+    // across the entire screen layer — ~3.2M pixels on a 17 Pro — at the
+    // exact moment the photo lands and the zoom transition is still running.
+    // A 60pt blur is indistinguishable from the same blur computed on a 96pt
+    // thumbnail and scaled back up, so that is what we do now: the blur runs
+    // once, off the main thread, over ~7K pixels.
     @ViewBuilder
     private var ambientBackdrop: some View {
         ZStack {
             Color.black
-            if let image {
-                Image(uiImage: image)
+            if let backdrop {
+                Image(uiImage: backdrop)
                     .resizable()
+                    .interpolation(.high)
                     .scaledToFill()
-                    .blur(radius: 60, opaque: true)
                     .overlay(Color.black.opacity(0.45))
             }
         }
         .ignoresSafeArea()
-        .animation(.easeOut(duration: 0.4), value: image == nil)
+        .animation(.easeOut(duration: 0.4), value: backdrop == nil)
     }
 
     private func reportZoom() {
@@ -1745,8 +2349,16 @@ private struct PagedPhotoView: View {
 
     private func loadFull() async {
         let opts = PHImageRequestOptions()
-        opts.deliveryMode = .highQualityFormat
-        opts.resizeMode = .none
+        // `.highQualityFormat` fires exactly once — at the *end* of a
+        // full-resolution decode — so tapping a photo used to mean staring at
+        // a spinner on black until the whole thing was ready.
+        // `.opportunistic` hands back PhotoKit's already-on-disk small
+        // rendition first (typically within a frame), then upgrades in place.
+        opts.deliveryMode = prefersSharp ? .highQualityFormat : .opportunistic
+        // `.none` meant "give me whatever rendition exists", which for a
+        // modern 48MP capture is the untouched original — ~190MB of RGBA
+        // once decoded, and up to five pages are alive at a time.
+        opts.resizeMode = prefersSharp ? .exact : .fast
         opts.isNetworkAccessAllowed = true
 
         let target = CGSize(width: 2500, height: 2500)
@@ -1755,14 +2367,56 @@ private struct PagedPhotoView: View {
             targetSize: target,
             contentMode: .aspectFit,
             options: opts
-        ) { img, _ in
+        ) { img, info in
+            guard let img else { return }
+            let isPlaceholder = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
             DispatchQueue.main.async {
+                // A request in flight when the frame changed must not paint over
+                // the frame that replaced it.
+                guard self.shownIdentifier == asset.localIdentifier else { return }
                 self.image = img
-                if let img {
+                if !isPlaceholder {
+                    // The share sheet renders from this bitmap — only ever
+                    // publish the real one, never the placeholder.
                     self.onImageReady(img)
                 }
+                self.makeBackdrop(from: img, placeholder: isPlaceholder)
             }
         }
+    }
+
+    /// Build the blurred backdrop once, off the main thread, at 96pt on the
+    /// long edge. See `ambientBackdrop` for why.
+    private func makeBackdrop(from img: UIImage, placeholder: Bool) {
+        guard backdrop == nil || !placeholder else { return }
+        Task.detached(priority: .userInitiated) {
+            let small = Self.blurredMiniature(of: img)
+            await MainActor.run { self.backdrop = small }
+        }
+    }
+
+    nonisolated private static func blurredMiniature(of image: UIImage) -> UIImage? {
+        let longEdge: CGFloat = 96
+        let w = image.size.width, h = image.size.height
+        guard w > 0, h > 0 else { return nil }
+        let k = longEdge / max(w, h)
+        let size = CGSize(width: max(1, (w * k).rounded()), height: max(1, (h * k).rounded()))
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        let tiny = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+
+        guard let ci = CIImage(image: tiny) else { return tiny }
+        // Radius 5 at 96px reads as ~radius 60 once it is scaled up to fill
+        // the screen, which is what the old full-size blur used.
+        let blurred = ci.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 5])
+            .cropped(to: ci.extent)
+        guard let cg = sharedCIContext.createCGImage(blurred, from: blurred.extent) else { return tiny }
+        return UIImage(cgImage: cg)
     }
 
 }
@@ -1784,7 +2438,14 @@ final class MemoriesViewModel: ObservableObject {
                  (.empty, .empty):
                 return true
             case (.loaded(let a), .loaded(let b)):
-                return a.map(\.localIdentifier) == b.map(\.localIdentifier)
+                // This runs on every `onChange(of: model.state)` evaluation.
+                // Mapping to `[String]` allocated two arrays and touched
+                // PhotoKit once per asset every single time; `elementsEqual`
+                // short-circuits on the first mismatch and allocates nothing.
+                guard a.count == b.count else { return false }
+                return a.elementsEqual(b) {
+                    $0 === $1 || $0.localIdentifier == $1.localIdentifier
+                }
             case (.error(let a), .error(let b)):
                 return a == b
             default:
@@ -1860,7 +2521,7 @@ final class MemoriesViewModel: ObservableObject {
                 self.state = assets.isEmpty ? .empty : .loaded(assets)
             }
             if !assets.isEmpty {
-                Self.updateWidget(count: assets.count, sampleFrom: assets)
+                await Self.updateWidget(count: assets.count, sampleFrom: assets)
             }
         }
     }
@@ -1876,7 +2537,7 @@ final class MemoriesViewModel: ObservableObject {
         if !assets.isEmpty {
             let snapshot = assets
             Task.detached(priority: .utility) {
-                Self.updateWidget(count: snapshot.count, sampleFrom: snapshot)
+                await Self.updateWidget(count: snapshot.count, sampleFrom: snapshot)
             }
         }
     }
@@ -1886,7 +2547,7 @@ final class MemoriesViewModel: ObservableObject {
     /// launch — a guaranteed hitch. Now: count is always cheap to write; the
     /// thumbnail regenerates at most once per day; timelines reload only
     /// when something actually changed.
-    nonisolated private static func updateWidget(count: Int, sampleFrom assets: [PHAsset]) {
+    nonisolated private static func updateWidget(count: Int, sampleFrom assets: [PHAsset]) async {
         let ud = UserDefaults.standard
         let lastCount = ud.integer(forKey: "widgetLastCount")
         let today = Calendar.current.startOfDay(for: Date())
@@ -1896,12 +2557,60 @@ final class MemoriesViewModel: ObservableObject {
         guard needsThumb || count != lastCount else { return }
 
         SharedMemoriesManager.shared.saveMemoryCount(count)
-        if needsThumb, let sample = assets.randomElement() {
-            SharedMemoriesManager.shared.saveWidgetThumbnail(from: sample)
-            ud.set(today, forKey: "widgetThumbDay")
+        if needsThumb {
+            // The widget used to show assets.randomElement() — a coin flip
+            // between the day's best photograph and a screenshot. Ask the
+            // curator for the best frame of the best moment instead, and fall
+            // back to the old behaviour only if curation has nothing to say.
+            let sample = await MomentCurator.shared.bestAsset(
+                in: assets, dayKey: MomentCurator.dayKey(for: Date())
+            ) ?? assets.randomElement()
+            // Only stamp the day as done if the thumbnail actually landed.
+            // Writing it unconditionally meant one failed fetch (an asset not
+            // yet downloaded from iCloud) pinned yesterday's photo for a day.
+            if let sample, SharedMemoriesManager.shared.saveWidgetThumbnail(from: sample) {
+                ud.set(today, forKey: "widgetThumbDay")
+            }
         }
         ud.set(count, forKey: "widgetLastCount")
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// Year of the oldest photo or video in the library.
+    ///
+    /// "On this day" is expressed to PhotoKit as one date-range predicate per
+    /// candidate year, OR'd together. Starting at 1970 means handing the
+    /// Photos database ~56 ranges to compile and evaluate on every load, the
+    /// large majority of which cannot possibly match — a library that starts
+    /// in 2012 only needs 14. Resolved with a single indexed `fetchLimit: 1`
+    /// query, and re-resolved once a day so an import of old scans is picked
+    /// up by the next day-rollover reload.
+    nonisolated static func earliestLibraryYear(fallback: Int) -> Int {
+        let ud = UserDefaults.standard
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        if let stamped = ud.object(forKey: "libraryEarliestYearDay") as? Date,
+           calendar.isDate(stamped, inSameDayAs: today),
+           let cached = ud.object(forKey: "libraryEarliestYear") as? Int,
+           cached > 0 {
+            return cached
+        }
+
+        let opts = PHFetchOptions()
+        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
+        opts.fetchLimit = 1
+        opts.predicate = NSPredicate(format: "mediaType == %d OR mediaType == %d",
+                                     PHAssetMediaType.image.rawValue,
+                                     PHAssetMediaType.video.rawValue)
+        guard let oldest = PHAsset.fetchAssets(with: opts).firstObject,
+              let created = oldest.creationDate else { return fallback }
+
+        // A year of slack absorbs assets whose creationDate is off by a
+        // timezone at the boundary.
+        let year = max(fallback, calendar.component(.year, from: created) - 1)
+        ud.set(year, forKey: "libraryEarliestYear")
+        ud.set(today, forKey: "libraryEarliestYearDay")
+        return year
     }
 
     nonisolated static func fetchMemories(for date: Date) -> [PHAsset] {
@@ -1909,9 +2618,11 @@ final class MemoriesViewModel: ObservableObject {
         let day = calendar.component(.day, from: date)
         let month = calendar.component(.month, from: date)
         let selectedYear = calendar.component(.year, from: date)
+        let firstYear = min(earliestLibraryYear(fallback: 1970), selectedYear)
 
         var datePredicates: [NSPredicate] = []
-        for year in 1970..<selectedYear {
+        datePredicates.reserveCapacity(max(0, selectedYear - firstYear))
+        for year in firstYear..<selectedYear {
             var comps = DateComponents()
             comps.year = year; comps.month = month; comps.day = day
             comps.hour = 0; comps.minute = 0; comps.second = 0
@@ -1932,7 +2643,10 @@ final class MemoriesViewModel: ObservableObject {
         ])
 
         let results = PHAsset.fetchAssets(with: opts)
-        return (0..<results.count).map { results.object(at: $0) }
+        guard results.count > 0 else { return [] }
+        // One batched trip across the PhotoKit boundary instead of `count`
+        // individual `object(at:)` calls.
+        return results.objects(at: IndexSet(integersIn: 0..<results.count))
     }
 }
 
@@ -2128,6 +2842,8 @@ class NotificationManager: ObservableObject {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["dailyMemoriesCheck"])
     }
 
+    /// Number of distinct moments on a given month/day across past years.
+    /// Metadata-only — see `MomentCurator.approximateMomentCount`.
     nonisolated private static func countMemories(month: Int, day: Int, fromYear: Int, beforeYear: Int) -> Int {
         let calendar = Calendar.current
         var datePredicates: [NSPredicate] = []
@@ -2143,13 +2859,21 @@ class NotificationManager: ObservableObject {
         }
         guard !datePredicates.isEmpty else { return 0 }
         let opts = PHFetchOptions()
+        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         opts.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
             NSPredicate(format: "mediaType == %d OR mediaType == %d",
                         PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue),
             NSCompoundPredicate(orPredicateWithSubpredicates: datePredicates)
         ])
         opts.includeHiddenAssets = false
-        return PHAsset.fetchAssets(with: opts).count
+
+        // Count *moments*, not files. "Notify me when there are at least 3"
+        // used to be satisfied by a single burst — one thing that happened,
+        // photographed eight times — which is not what anyone means by it.
+        let results = PHAsset.fetchAssets(with: opts)
+        guard results.count > 0 else { return 0 }
+        let assets = results.objects(at: IndexSet(integersIn: 0..<results.count))
+        return MomentCurator.approximateMomentCount(of: assets)
     }
 
     /// Year of the oldest photo in the library (fallback 2000).
@@ -2240,6 +2964,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
     @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
+    @AppStorage("bestOfMode") private var bestOf: Bool = false
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
     @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
 
@@ -2291,17 +3016,25 @@ struct SettingsView: View {
                             displayedComponents: .hourAndMinute
                         )
                         
-                        Picker("Minimum Photos", selection: $notificationManager.minimumPhotos) {
-                            Text("1 photo").tag(1)
-                            Text("3 photos").tag(3)
-                            Text("5 photos").tag(5)
-                            Text("10 photos").tag(10)
+                        Picker("Minimum Moments", selection: $notificationManager.minimumPhotos) {
+                            Text("1 moment").tag(1)
+                            Text("3 moments").tag(3)
+                            Text("5 moments").tag(5)
+                            Text("10 moments").tag(10)
                         }
                     }
                 } header: {
                     Text("Notifications")
                 } footer: {
-                    Text("Get a daily notification only on days when you have enough memories. Scheduled up to 30 days ahead each time you open the app.")
+                    Text("Get a daily notification only on days when you have enough memories. A burst of eight shots of the same thing counts as one moment, not eight. Scheduled up to 30 days ahead each time you open the app.")
+                }
+
+                Section {
+                    Toggle("Best of", isOn: $bestOf)
+                } header: {
+                    Text("Your Grid")
+                } footer: {
+                    Text("Tuck near-identical shots behind a single card, so a day reads as moments instead of files. Nothing is ever deleted — turn this off any time to see every photo again.")
                 }
 
                 Section {
@@ -2672,8 +3405,32 @@ struct HatGlyph: View {
 
 private struct DailyRevealView: View {
     let assets: [PHAsset]
+    /// Curated frames to deal, best moment of each year. Empty means curation
+    /// was unavailable, and the old newest-first behaviour stands in.
+    var fan: [PHAsset] = []
     let date: Date
     let onComplete: () -> Void
+    /// Precomputed at init. This walks every asset in the day, and it used to
+    /// be a computed property read from `body` — so it re-ran on all dozen-odd
+    /// animation beats of the reveal, which is the one moment in the app where
+    /// a dropped frame is most visible.
+    private let yearSpan: Int
+
+    init(assets: [PHAsset], fan: [PHAsset] = [], date: Date, onComplete: @escaping () -> Void) {
+        self.assets = assets
+        self.fan = fan
+        self.date = date
+        self.onComplete = onComplete
+        let calendar = Calendar.current
+        var years = Set<Int>()
+        years.reserveCapacity(32)
+        for asset in assets {
+            if let created = asset.creationDate {
+                years.insert(calendar.component(.year, from: created))
+            }
+        }
+        self.yearSpan = years.count
+    }
 
     // Sequence beats
     @State private var showMeta = false
@@ -2694,21 +3451,16 @@ private struct DailyRevealView: View {
     private var count: Int { assets.count }
     private var mood: SpriteMood { SpriteMood.forCount(count) }
 
-    private var fanAssets: [PHAsset] { Array(assets.prefix(5)) }
+    private var fanAssets: [PHAsset] {
+        fan.isEmpty ? Array(assets.prefix(5)) : Array(fan.prefix(5))
+    }
 
     private var metaString: String {
-        let f = DateFormatter(); f.dateFormat = "EEEE · MMMM d"
-        return f.string(from: date).uppercased()
+        Fmt.weekdayMonthDay.string(from: date).uppercased()
     }
 
     private var headlineString: String {
         count == 1 ? "1 memory" : "\(count) memories"
-    }
-
-    private var yearSpan: Int {
-        Set(assets.compactMap { $0.creationDate }.map {
-            Calendar.current.component(.year, from: $0)
-        }).count
     }
 
     private var subtitleString: String {
@@ -3369,9 +4121,7 @@ nonisolated private func makeStoryImage(from image: UIImage, asset: PHAsset, can
 
 nonisolated private func storyFormattedDate(_ date: Date?) -> String {
     guard let date else { return "" }
-    let formatter = DateFormatter()
-    formatter.dateFormat = "MMMM d, yyyy"
-    return formatter.string(from: date)
+    return Fmt.longDate.string(from: date)
 }
 
 nonisolated private func storyYearsAgo(_ date: Date?) -> String {

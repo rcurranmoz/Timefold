@@ -1,28 +1,58 @@
 import WidgetKit
 import SwiftUI
+import UIKit
 
 struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> SimpleEntry {
-        SimpleEntry(date: Date(), count: 0)
+        SimpleEntry(date: Date(), count: 0, photo: nil)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (SimpleEntry) -> ()) {
-        let count = SharedMemoriesManager.shared.readMemoryCount()
-        completion(SimpleEntry(date: Date(), count: count))
+        completion(Self.entry(for: context.family))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> ()) {
+        let entry = Self.entry(for: context.family)
+        // The count only changes when the calendar day rolls, so asking to be
+        // woken hourly spent 24x the refresh budget to redraw the same number.
+        completion(Timeline(entries: [entry], policy: .after(Self.nextMidnight(after: entry.date))))
+    }
+
+    /// Read the shared container once, here — not from the view body, which
+    /// re-evaluates and would re-decode the JPEG every time inside an
+    /// extension with a hard memory ceiling.
+    private static func entry(for family: WidgetFamily) -> SimpleEntry {
         let count = SharedMemoriesManager.shared.readMemoryCount()
-        let currentDate = Date()
-        let entry = SimpleEntry(date: currentDate, count: count)
-        let nextUpdate = Calendar.current.date(byAdding: .hour, value: 1, to: currentDate)!
-        completion(Timeline(entries: [entry], policy: .after(nextUpdate)))
+        // Accessory families draw no photo; don't pay to decode one.
+        let photo = family.usesPhotoBackground ? SharedMemoriesManager.shared.readWidgetThumbnail() : nil
+        return SimpleEntry(date: Date(), count: count, photo: photo)
+    }
+
+    private static func nextMidnight(after date: Date) -> Date {
+        let calendar = Calendar.current
+        return calendar.nextDate(after: date,
+                                 matching: DateComponents(hour: 0, minute: 0, second: 0),
+                                 matchingPolicy: .nextTime)
+            ?? calendar.date(byAdding: .hour, value: 1, to: date)!
+    }
+}
+
+extension WidgetFamily {
+    /// Accessory complications render monochrome on a system backdrop and
+    /// never show the day's photo.
+    var usesPhotoBackground: Bool {
+        switch self {
+        case .accessoryCircular, .accessoryRectangular, .accessoryInline: return false
+        default: return true
+        }
     }
 }
 
 struct SimpleEntry: TimelineEntry {
     let date: Date
     let count: Int
+    /// Decoded once per timeline entry, in the provider.
+    let photo: UIImage?
 }
 
 struct TimefoldWidgetEntryView: View {
@@ -45,8 +75,8 @@ struct TimefoldWidgetEntryView: View {
             }
         }
         .containerBackground(for: .widget) {
-            if family != .accessoryCircular && family != .accessoryRectangular {
-                if let image = SharedMemoriesManager.shared.readWidgetThumbnail() {
+            if family.usesPhotoBackground {
+                if let image = entry.photo {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()

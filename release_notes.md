@@ -1,13 +1,12 @@
 # App Store Release Notes
 
-## App Store description (updated for v2.0 — Latent: On This Day)
+## App Store description (updated for v2.1 — Best of)
 
 Latent shows you photos from this day in past years — entirely on your device.
 
-Open it each morning and your memories arrive like a hand of polaroids, dealt out by a little companion who's happy you came back.
-
 - No accounts, no ads, no tracking
 - Works with your Apple Photos library
+- Best of: ten near-identical shots become one card, so a day reads as moments
 - A warm daily reveal: photos from this day, across all your years
 - Pick your companion — Foldy, Luna, or Mochi
 - Unlock hats for them just by showing up — no purchases, time is the only currency
@@ -16,6 +15,52 @@ Open it each morning and your memories arrive like a hand of polaroids, dealt ou
 - Complete privacy and control
 
 Your photos stay yours.
+
+---
+
+## v2.1 (build 63) — What's New
+
+**Submitted as-is.**
+
+Your day, without the duplicates.
+
+- Best of: near-identical shots tuck behind one card, so a day reads as moments instead of files. Tap the number on a photo to see every shot of that moment.
+- The daily reveal now spans five different years instead of five minutes of the same afternoon.
+- Your widget shows the day's best photo instead of a random one.
+- The daily reminder counts moments, not files, so a single burst no longer looks like a busy day.
+- Fixed: the widget could get stuck on yesterday's photo, and the big year could fade out while you were still scrolling. The widget is easier on your battery too.
+
+Nothing is ever deleted, and it's all worked out on your phone.
+
+### Alternate (longer, prose — not used)
+
+Your day, without the duplicates.
+
+Latent can now tuck near-identical shots behind a single card, so a day reads as moments instead of files. Eight tries at the same selfie become one picture, with a small number showing how many are underneath. Tap that number while you're looking at a photo to see every shot of the moment — and choose a different one if you like it better.
+
+Nothing is hidden from you, and nothing is ever deleted. Turn it on when Latent offers, or any time in Settings.
+
+The daily reveal got better at its job too. It used to deal five photos from whichever year was most recent, often five from the same ten minutes. Now it deals the best moment from each of five different years, so opening the app finally feels like the span of time it keeps promising you.
+
+Your widget shows the day's best photo instead of whichever one it happened to grab. And if you keep the daily reminder on, it now counts moments rather than files — a burst of eight shots of one thing no longer reads as a busy day.
+
+All of this is worked out on your phone. Nothing was sent anywhere to figure it out, and nothing ever will be.
+
+---
+
+## v2.0.1 (build 60) — What's New
+
+Speed.
+
+Your grid now loads photos before you scroll to them, so you meet pictures instead of grey placeholders. Opening a photo is quicker and uses about half the memory it used to. And the app finds each day's memories faster every time you open it.
+
+On iPad, thumbnails were being drawn smaller than the screen actually needed, which made them look soft. They don't anymore.
+
+Nothing moved. Your companion, your hats and your unlock streak are exactly where you left them — and as always, your photos never leave your device.
+
+### Alternate (shorter)
+
+A faster Latent. Thumbnails load before you scroll to them, photos open quicker and lighter, and iPad thumbnails are sharp instead of soft. Everything else is exactly where you left it.
 
 ---
 

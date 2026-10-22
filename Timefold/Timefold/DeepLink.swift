@@ -89,3 +89,17 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
         [.banner, .list]
     }
 }
+
+/// Testing hooks. `LATENT_DATE=yyyy-MM-dd` makes the app treat that day as
+/// today — a simulator library rarely has photos on the real date. Always
+/// nil in Release.
+enum DebugOverrides {
+    nonisolated static var forcedToday: Date? {
+        #if DEBUG
+        guard let raw = ProcessInfo.processInfo.environment["LATENT_DATE"] else { return nil }
+        return DayLink.dayFormatter.date(from: raw)
+        #else
+        return nil
+        #endif
+    }
+}

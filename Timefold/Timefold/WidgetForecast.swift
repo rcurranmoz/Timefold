@@ -11,6 +11,7 @@
 import Foundation
 import Photos
 import WidgetKit
+import os
 
 enum WidgetForecaster {
     /// Today plus this many following days. Each costs a curation pass the
@@ -22,11 +23,36 @@ enum WidgetForecaster {
     /// Hero plus up to three other years for the medium and large widgets.
     nonisolated static let tilesPerDay = 4
 
+    /// One refresh at a time. Two overlapping runs each prune the widget
+    /// folder down to *their own* files — so whichever pruned last could
+    /// delete photos the other run's forecast was pointing at. Found exactly
+    /// that on the simulator: a forecast naming two files that were gone.
+    /// A request that arrives mid-run is folded into one more pass after it.
+    private nonisolated static let gate = OSAllocatedUnfairLock(initialState: (running: false, again: false))
+
     /// Rebuild the forecast if today's isn't current. Safe to call on every
     /// load of today; it returns immediately when nothing has changed.
     nonisolated static func refresh(todayCount: Int) async {
+        let proceed = gate.withLock { state -> Bool in
+            if state.running { state.again = true; return false }
+            state.running = true
+            return true
+        }
+        guard proceed else { return }
+        while true {
+            await run(todayCount: todayCount)
+            let again = gate.withLock { state -> Bool in
+                if state.again { state.again = false; return true }
+                state.running = false
+                return false
+            }
+            if !again { break }
+        }
+    }
+
+    private nonisolated static func run(todayCount: Int) async {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+        let today = calendar.startOfDay(for: DebugOverrides.forcedToday ?? Date())
         let todayKey = DayLink.dayFormatter.string(from: today)
 
         let existing = SharedMemoriesManager.shared.readForecast()

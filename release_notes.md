@@ -1,20 +1,54 @@
 # App Store Release Notes
 
-## App Store description (updated for v2.1 — Best of)
+## App Store description (updated for v2.2 — Chapters)
 
 Latent shows you photos from this day in past years — entirely on your device.
 
 - No accounts, no ads, no tracking
 - Works with your Apple Photos library
+- Every year is its own chapter, led by its best photo
+- Live Photos play — press and hold to see the moment around the shot
+- Heart a photo and it's the one Latent picks for its year
 - Best of: ten near-identical shots become one card, so a day reads as moments
-- A warm daily reveal: photos from this day, across all your years
+- A warm daily reveal — and a special one on big anniversaries
+- A widget that turns the page at midnight, with the day's best photo
 - Pick your companion — Foldy, Luna, or Mochi
-- Unlock hats for them just by showing up — no purchases, time is the only currency
+- Unlock hats just by showing up, plus seasonal hats around the holidays
 - Once a day, your companion hides in one of your photos. Happy hunting.
-- Swipe through memories, share favorites, or delete unwanted photos
 - Complete privacy and control
 
 Your photos stay yours.
+
+---
+
+## v2.2 (build 66) — What's New
+
+Chapters.
+
+- Every year is now its own chapter, with the year and how long ago at the top, led by that year's best photo.
+- Live Photos move again. Press and hold any Live Photo to see the moment around it.
+- Heart a photo and it's saved to your Favorites in Photos — and from then on it's the one Latent picks to stand for its moment and its year.
+- A new widget, in three sizes. It shows the day's best photo and how many years ago it was taken, and it now turns the page at midnight on its own. Tap a year to go straight to it.
+- Reminders show you the photo they're about and tell you which year.
+- On a big anniversary — five, ten, twenty years — the daily reveal is about that year.
+- Quiet days now offer a few photos from the same week in other years.
+- Seasonal hats: your companion has something for October. Open Latent while it's out and it's yours to keep.
+- Fixed: picking another date could make the widget show that date's count as today's.
+
+As always, all of it is worked out on your phone. Nothing leaves it.
+
+### TestFlight "What to Test" (paste-ready)
+
+New in 2.2: the grid is now one chapter per year, there's a heart in the photo viewer, Live Photos play when you press and hold, and the widget has been rebuilt.
+
+Most useful things to check:
+
+- THE WIDGET. Add the medium or large one. Does it change over on its own at midnight, without you opening the app? Tapping one of the small year photos should open that year.
+- LIVE PHOTOS. Open one: it should stir briefly on arrival, and press-and-hold or tapping LIVE should play it with sound. Does holding it ever fight with swiping or zooming?
+- HEARTS. Heart a photo in the viewer, then check it's in Favorites in Photos. Tomorrow (or after relaunching) it should lead its year's chapter.
+- REMINDERS. If you have the daily reminder on, does it show a photo, and does tapping it open that year?
+
+Please say your device, iOS version, and roughly how big your library is.
 
 ---
 

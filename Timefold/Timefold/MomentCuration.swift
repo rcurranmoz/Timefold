@@ -321,7 +321,9 @@ actor MomentCurator {
         let moments = await moments(for: assets, dayKey: dayKey)
         return bestMomentByYear(moments)
             .map { (year: $0.key, asset: $0.value.pick) }
-            .sorted { rank(of: $0.asset) > rank(of: $1.asset) }
+            // Ties broken by year so the order is the same on every call —
+            // the widget names its files after these picks.
+            .sorted { (rank(of: $0.asset), $0.year) > (rank(of: $1.asset), $1.year) }
     }
 
     private func bestMomentByYear(_ moments: [Moment]) -> [Int: Moment] {

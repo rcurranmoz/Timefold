@@ -1,0 +1,91 @@
+//
+//  DeepLink.swift
+//  Latent
+//
+//  One way in from outside the app: `latent://day/2026-10-22?year=2019`.
+//  The widget, its per-year thumbnails and the daily notification all speak
+//  it, so "tap the 2019 photo" always lands on the 2019 chapter of that day.
+//
+
+import Foundation
+import UserNotifications
+import Combine
+
+/// A request to show a particular day, optionally scrolled to one year of it.
+struct DayLink: Equatable {
+    let date: Date
+    let year: Int?
+
+    static let scheme = "latent"
+
+    /// `yyyy-MM-dd` in the user's calendar. Shared with the widget's forecast
+    /// and the notification payload, so all three agree on what a day is.
+    nonisolated static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    init(date: Date, year: Int? = nil) {
+        self.date = date
+        self.year = year
+    }
+
+    init?(url: URL) {
+        guard url.scheme == Self.scheme, url.host() == "day",
+              let raw = url.pathComponents.dropFirst().first,
+              let date = Self.dayFormatter.date(from: raw) else { return nil }
+        self.date = date
+        self.year = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "year" }?.value.flatMap(Int.init)
+    }
+
+    init?(userInfo: [AnyHashable: Any]) {
+        guard let raw = userInfo["day"] as? String,
+              let date = Self.dayFormatter.date(from: raw) else { return nil }
+        self.date = date
+        self.year = userInfo["year"] as? Int
+    }
+
+    var url: URL {
+        var c = URLComponents()
+        c.scheme = Self.scheme
+        c.host = "day"
+        c.path = "/" + Self.dayFormatter.string(from: date)
+        if let year { c.queryItems = [URLQueryItem(name: "year", value: String(year))] }
+        return c.url!
+    }
+}
+
+/// Holds the most recent outside request until the main screen consumes it.
+/// A notification tap can arrive before any view exists, so it cannot go
+/// straight to one.
+@MainActor
+final class DeepLinkRouter: ObservableObject {
+    static let shared = DeepLinkRouter()
+    @Published var pending: DayLink?
+}
+
+/// Routes notification taps into the router. Retained by the app for its
+/// whole lifetime — `UNUserNotificationCenter.delegate` is weak.
+final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = NotificationRouter()
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard let link = DayLink(userInfo: response.notification.request.content.userInfo) else { return }
+        await MainActor.run { DeepLinkRouter.shared.pending = link }
+    }
+
+    /// Arriving while Latent is already open: show it anyway, quietly.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .list]
+    }
+}

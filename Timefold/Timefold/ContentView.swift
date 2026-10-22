@@ -185,6 +185,11 @@ struct ContentView: View {
     /// Curated fan for the daily reveal. Empty until curation lands, at which
     /// point DailyRevealView falls back to the old prefix(5).
     @State private var revealFan: [PHAsset] = []
+    /// Year -> the localIdentifier that leads that year's chapter.
+    @State private var yearLeads: [Int: String] = [:]
+    /// A year the grid should scroll to once it's on screen — set by a widget
+    /// or notification tap, or by choosing a nearby day.
+    @State private var pendingYear: Int?
     @State private var momentsAreTrustworthy = false
     /// The curation token we actually hold results for. While this differs from
     /// `curationToken`, the curated grid does not exist yet — and painting the
@@ -233,9 +238,12 @@ struct ContentView: View {
                     BrandedLoadingView()
 
                 case .empty:
-                    EmptyMemoriesView(date: selectedDate) {
-                        showingDatePicker = true
-                    }
+                    EmptyMemoriesView(
+                        date: selectedDate,
+                        nearby: model.nearby,
+                        onExplore: { showingDatePicker = true },
+                        onOpenNearby: { asset in openNearby(asset) }
+                    )
 
                 case .loaded(let assets):
                     if isSettling {
@@ -249,6 +257,10 @@ struct ContentView: View {
                     MemoriesGridView(
                         assets: displayed(assets),
                         stacks: stacks,
+                        leads: yearLeads,
+                        favoriteIDs: favoriteIDs(in: assets),
+                        itemNoun: bestOf && canShowBestOf ? "MOMENT" : "MEMORY",
+                        jumpToYear: $pendingYear,
                         isRevealActive: showingReveal,
                         onRefresh: { await model.reloadQuietly(for: selectedDate) },
                         isSelecting: $isSelecting,
@@ -282,6 +294,12 @@ struct ContentView: View {
         }
         .task {
             VisitTracker.recordVisit()
+            #if DEBUG
+            if let raw = ProcessInfo.processInfo.environment["LATENT_DATE"],
+               let forced = DayLink.dayFormatter.date(from: raw) {
+                selectedDate = forced
+            }
+            #endif
             model.start()
         }
         .task(id: curationToken) {
@@ -292,6 +310,11 @@ struct ContentView: View {
             // stale — hopping between apps shouldn't reload every time.
             VisitTracker.recordVisit()
             model.refreshIfNeeded(for: selectedDate)
+        }
+        .onReceive(DeepLinkRouter.shared.$pending) { link in
+            guard let link else { return }
+            DeepLinkRouter.shared.pending = nil
+            open(link)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             // Reload when system time/date changes (like manual date change)
@@ -587,21 +610,56 @@ struct ContentView: View {
 
     private func curate() async {
         let token = curationToken
+        let isToday = Calendar.current.isDateInToday(selectedDate)
         guard case .loaded(let assets) = model.state else {
             moments = []
             momentsAreTrustworthy = false
+            yearLeads = [:]
             curatedToken = token
+            if isToday, model.state == .empty { MemoriesViewModel.refreshWidget(todayCount: 0) }
             return
         }
-        let result = await MomentCurator.shared.moments(
-            for: assets, dayKey: MomentCurator.dayKey(for: selectedDate))
+        let dayKey = MomentCurator.dayKey(for: selectedDate)
+        let result = await MomentCurator.shared.moments(for: assets, dayKey: dayKey)
         let trustworthy = await MomentCurator.shared.visionAvailable
-        let fan = await MomentCurator.shared.revealFan(
-            for: assets, dayKey: MomentCurator.dayKey(for: selectedDate))
+        let fan = await MomentCurator.shared.revealFan(for: assets, dayKey: dayKey)
+        let leads = await MomentCurator.shared.yearLeads(for: assets, dayKey: dayKey)
         moments = result
         momentsAreTrustworthy = trustworthy
         revealFan = fan
+        yearLeads = leads
         curatedToken = token
+        // After today's own pass, so the forecast replays it from cache
+        // rather than competing with it.
+        if isToday { MemoriesViewModel.refreshWidget(todayCount: assets.count) }
+    }
+
+    /// Hearts as Photos knows them *now*. The assets inside `moments` are
+    /// snapshots from when the day was curated; the model's are refreshed on
+    /// every library change, so the grid's badges follow a heart immediately
+    /// without re-curating (and reshuffling) the day under the reader's finger.
+    private func favoriteIDs(in assets: [PHAsset]) -> Set<String> {
+        Set(assets.lazy.filter(\.isFavorite).map(\.localIdentifier))
+    }
+
+    /// Show a day from outside — widget, notification, or a nearby suggestion.
+    private func open(_ link: DayLink) {
+        let calendar = Calendar.current
+        // "On this day" is a month and a day, shown against this year.
+        var comps = calendar.dateComponents([.month, .day], from: link.date)
+        comps.year = calendar.component(.year, from: Date())
+        let target = calendar.date(from: comps) ?? link.date
+        if !calendar.isDate(target, inSameDayAs: selectedDate) || model.state == .empty {
+            selectedDate = target
+            model.loadMemoriesFor(date: target)
+        }
+        pendingYear = link.year
+    }
+
+    private func openNearby(_ asset: PHAsset) {
+        guard let created = asset.creationDate else { return }
+        Haptics.tap(.light)
+        open(DayLink(date: created, year: Calendar.current.component(.year, from: created)))
     }
 
     /// True while Best of is on and the grouping for what is on screen has not
@@ -1075,7 +1133,11 @@ private struct BrandedLoadingView: View {
 
 private struct EmptyMemoriesView: View {
     let date: Date
+    /// Photos from the days either side, in past years. See
+    /// `MemoriesViewModel.fetchNearby`.
+    var nearby: [PHAsset] = []
     var onExplore: (() -> Void)? = nil
+    var onOpenNearby: ((PHAsset) -> Void)? = nil
     @State private var appeared = false
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
     @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
@@ -1091,19 +1153,24 @@ private struct EmptyMemoriesView: View {
             VStack(spacing: 10) {
                 TimeSprite(mood: .sleepy, kind: MascotKind(rawValue: mascotRaw) ?? .foldy,
                            hat: HatKind(rawValue: hatRaw) ?? .none)
-                    .scaleEffect(0.62)
-                    .frame(height: 150)
+                    .scaleEffect(nearby.isEmpty ? 0.62 : 0.5)
+                    .frame(height: nearby.isEmpty ? 150 : 120)
                 Text(dateString)
                     .font(.latentSerif(38))
                     .foregroundStyle(Theme.skyInk())
                 Text("NO MEMORIES ON THIS DAY YET")
                     .metaLabel(11, color: Theme.skyInkSoft())
-                Text("Today's photos become next year's memories.\nGo make one worth keeping.")
-                    .font(.latentRounded(14, weight: .medium))
-                    .foregroundStyle(Theme.skyInkSoft().opacity(0.9))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 44)
-                    .padding(.top, 6)
+
+                if nearby.isEmpty {
+                    Text("Today's photos become next year's memories.\nGo make one worth keeping.")
+                        .font(.latentRounded(14, weight: .medium))
+                        .foregroundStyle(Theme.skyInkSoft().opacity(0.9))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 44)
+                        .padding(.top, 6)
+                } else {
+                    nearbyStrip
+                }
 
                 if let onExplore {
                     Button(action: onExplore) {
@@ -1115,7 +1182,7 @@ private struct EmptyMemoriesView: View {
                             .background(Theme.skyInk().opacity(0.08), in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    .padding(.top, 18)
+                    .padding(.top, nearby.isEmpty ? 18 : 8)
                 }
             }
             .opacity(appeared ? 1 : 0)
@@ -1123,6 +1190,42 @@ private struct EmptyMemoriesView: View {
             .animation(.easeOut(duration: 0.5), value: appeared)
         }
         .onAppear { appeared = true }
+    }
+
+    /// "This day was quiet — but the week wasn't." A row of polaroids from
+    /// nearby days, each one a door to that day.
+    private var nearbyStrip: some View {
+        VStack(spacing: 12) {
+            Text("But this week, years ago…")
+                .font(.latentSerif(17, weight: .regular))
+                .italic()
+                .foregroundStyle(Theme.skyInkSoft())
+                .padding(.top, 14)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(Array(nearby.enumerated()), id: \.element.localIdentifier) { i, asset in
+                        Button {
+                            onOpenNearby?(asset)
+                        } label: {
+                            PolaroidFrame(caption: caption(for: asset), photoSize: 96) {
+                                AssetThumbnailView(asset: asset, targetSize: CGSize(width: 300, height: 300))
+                            }
+                            .rotationEffect(.degrees(i.isMultiple(of: 2) ? -3 : 2.5))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open \(caption(for: asset))")
+                    }
+                }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 14)
+            }
+        }
+    }
+
+    private func caption(for asset: PHAsset) -> String {
+        guard let d = asset.creationDate else { return "" }
+        return Fmt.mediumDate.string(from: d)
     }
 }
 
@@ -1170,80 +1273,22 @@ private struct DeniedAccessView: View {
     }
 }
 
-/// Scroll-derived chrome — the big floating year. It lives in a reference
-/// type held by a plain `@State` so that *only the badge* subscribes to it.
-/// When these two values were `@State` on `MemoriesGridView`, every year tick
-/// and every scroll start/stop invalidated the whole grid body, which meant
-/// re-running `Array(assets.enumerated())` — a fresh array of every asset in
-/// the day — several times a second while the user's finger was moving.
-@MainActor
-final class ScrollChromeModel: ObservableObject {
-    @Published private(set) var year: Int?
-    @Published private(set) var isScrolling = false
-
-    private var lastYearChange: Date = .distantPast
-    private var hideTask: Task<Void, Never>?
-
-    func update(index: Int, assets: [PHAsset]) {
-        guard index >= 0, index < assets.count,
-              let assetDate = assets[index].creationDate else { return }
-        let newYear = Calendar.current.component(.year, from: assetDate)
-
-        // Throttle the year *value* to one change per 0.3s — but never skip the
-        // hide-timer reschedule below. Scrolling fast through a day that spans
-        // many years throttles almost every update, and an early return here
-        // left an older 800ms timer to fire and fade the badge out with the
-        // user's finger still down.
-        if year != newYear, Date().timeIntervalSince(lastYearChange) > 0.3 {
-            lastYearChange = Date()
-            withAnimation(.easeInOut(duration: 0.2)) {
-                year = newYear
-                isScrolling = true
-            }
-        } else if !isScrolling {
-            withAnimation(.easeInOut(duration: 0.2)) { isScrolling = true }
-        }
-
-        hideTask?.cancel()
-        hideTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            guard !Task.isCancelled, let self else { return }
-            withAnimation(.easeOut(duration: 0.3)) { self.isScrolling = false }
-        }
-    }
-
-    func reset() {
-        hideTask?.cancel()
-        year = nil
-        isScrolling = false
-    }
-}
-
-private struct YearBadge: View {
-    @ObservedObject var model: ScrollChromeModel
-
-    var body: some View {
-        VStack {
-            Spacer()
-            if let year = model.year {
-                Text(String(year))
-                    .font(.latentSerif(84))
-                    .foregroundStyle(.primary.opacity(0.32))
-                    .shadow(color: Color(uiColor: .systemBackground).opacity(0.6), radius: 12)
-            }
-            Spacer()
-        }
-        .allowsHitTesting(false)
-        .opacity(model.isScrolling ? 1.0 : 0.0)
-        .animation(.easeIn(duration: 0.6), value: model.isScrolling)
-    }
-}
-
+/// The day, read as chapters: one per year, newest first, each led by that
+/// year's strongest frame. Before this the grid was one undifferentiated
+/// stream of files, and the only sign of which year you were in was a large
+/// number that faded in while scrolling.
 private struct MemoriesGridView: View {
     let assets: [PHAsset]
     /// localIdentifier -> every frame of that moment, when "Best of" is on.
     /// Empty otherwise.
     var stacks: [String: [PHAsset]] = [:]
+    /// Year -> the frame that leads its chapter.
+    var leads: [Int: String] = [:]
+    /// Which of these Photos currently has a heart on.
+    var favoriteIDs: Set<String> = []
+    /// "MEMORY" or "MOMENT", singular — chapter headers pluralise it.
+    var itemNoun: String = "MEMORY"
+    @Binding var jumpToYear: Int?
     var isRevealActive: Bool = false
     var onRefresh: (() async -> Void)? = nil
     @Binding var isSelecting: Bool
@@ -1253,7 +1298,6 @@ private struct MemoriesGridView: View {
     private let spacing: CGFloat = 2
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
 
-    @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
     @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
 
@@ -1279,19 +1323,11 @@ private struct MemoriesGridView: View {
     @Environment(\.displayScale) private var displayScale
     @State private var entered = false
     @State private var deletedAssets: Set<String> = []
-    /// Reference type in plain `@State`: the grid holds it, but does not
-    /// observe it. See `ScrollChromeModel`.
-    @State private var scrollChrome = ScrollChromeModel()
 
     var body: some View {
         ZStack {
             gridContent
 
-            // Year badge overlay (only when scrolling)
-            if showFloatingYear {
-                YearBadge(model: scrollChrome)
-            }
-            
             // Selection mode toolbar at bottom
             if isSelecting {
                 VStack {
@@ -1314,89 +1350,119 @@ private struct MemoriesGridView: View {
             }
         }
     }
-    
+
     private var gridContent: some View {
         GeometryReader { geo in
             let cell = (geo.size.width - spacing * 2) / 3
             // Ask PhotoKit for exactly the pixels this screen will show.
             let thumbPixels = CGSize(width: (cell * displayScale).rounded(),
                                      height: (cell * displayScale).rounded())
+            let chapters = Chapter.build(from: assets, leads: leads)
+            // Reading order — what the pager swipes through, and what the
+            // prefetcher warms. Leads come first within their year.
+            let ordered = chapters.flatMap(\.items)
+            let position = Dictionary(uniqueKeysWithValues:
+                ordered.enumerated().map { ($0.element.localIdentifier, $0.offset) })
 
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: spacing) {
-                    ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in
-                        if !deletedAssets.contains(asset.localIdentifier) {
-                            GridCellView(
-                                assets: assets,
-                                asset: asset,
-                                cellSize: cell,
-                                thumbnailSize: thumbPixels,
-                                isSelecting: isSelecting,
-                                isSelected: selectedAssets.contains(asset.localIdentifier),
-                                stackCount: stacks[asset.localIdentifier]?.count ?? 0,
-                                stacks: stacks,
-                                namespace: heroNS,
-                                onToggleSelection: { toggleSelection(for: asset) },
-                                onDelete: { deletePhoto(asset: asset) }
-                            )
-                            // Cascade the first screenful in when the reveal
-                            // lifts; cells created later mount already-entered.
-                            .opacity(entered ? 1 : 0)
-                            .scaleEffect(entered ? 1 : 0.88)
-                            .animation(
-                                .spring(response: 0.5, dampingFraction: 0.8)
-                                    .delay(min(Double(index) * 0.025, 0.45)),
-                                value: entered
-                            )
-                            .overlay {
-                                if index == hiddenIndex {
-                                    HiddenCompanion(
-                                        corner: daySeed % 4,
-                                        kind: MascotKind(rawValue: mascotRaw) ?? .foldy,
-                                        hat: HatKind(rawValue: hatRaw) ?? .none
-                                    )
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        ForEach(chapters) { chapter in
+                            Section {
+                                if let hero = chapter.hero {
+                                    let heroHeight = (geo.size.width * 0.68).rounded()
+                                    cellView(hero, ordered: ordered, index: position[hero.localIdentifier] ?? 0,
+                                             width: geo.size.width, height: heroHeight,
+                                             thumbPixels: CGSize(width: (geo.size.width * displayScale).rounded(),
+                                                                 height: (heroHeight * displayScale).rounded()))
+                                        .padding(.bottom, spacing)
                                 }
+                                LazyVGrid(columns: columns, spacing: spacing) {
+                                    ForEach(chapter.rest, id: \.localIdentifier) { asset in
+                                        cellView(asset, ordered: ordered, index: position[asset.localIdentifier] ?? 0,
+                                                 width: cell, height: cell, thumbPixels: thumbPixels)
+                                    }
+                                }
+                                .padding(.bottom, 6)
+                            } header: {
+                                ChapterHeader(year: chapter.year, count: chapter.items.count, noun: itemNoun)
+                                    .id(Chapter.anchor(chapter.year))
                             }
                         }
                     }
                 }
-                .padding(.horizontal, 0)
+                .scrollIndicators(.hidden)
+                .refreshable { await onRefresh?() }
+                .ignoresSafeArea(edges: .bottom)
+                .task(id: ordered.count) {
+                    ThumbnailPrefetcher.shared.reset(assets: ordered, targetSize: thumbPixels)
+                }
+                .onAppear {
+                    if !isRevealActive { entered = true }
+                    jump(proxy, chapters: chapters)
+                }
+                .onChange(of: isRevealActive) {
+                    if !isRevealActive { entered = true }
+                }
+                .onChange(of: jumpToYear) {
+                    jump(proxy, chapters: chapters)
+                }
             }
-            // One scroll observer + row math replaces a GeometryReader,
-            // preference write, and onChange per visible cell per frame.
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                geo.contentOffset.y + geo.contentInsets.top
-            } action: { old, new in
-                guard abs(new - old) > 2 else { return }
-                // Which row is passing ~130pt below the masthead right now?
-                let row = max(0, Int((new + 130) / (cell + spacing)))
-                let index = min(max(0, row * 3), max(0, assets.count - 1))
-                scrollChrome.update(index: index, assets: assets)
-                // Decode the next screenful before the user gets there.
-                ThumbnailPrefetcher.shared.update(center: index)
+        }
+    }
+
+    @ViewBuilder
+    private func cellView(_ asset: PHAsset, ordered: [PHAsset], index: Int,
+                          width: CGFloat, height: CGFloat, thumbPixels: CGSize) -> some View {
+        if !deletedAssets.contains(asset.localIdentifier) {
+            GridCellView(
+                assets: ordered,
+                asset: asset,
+                cellSize: width,
+                cellHeight: height,
+                thumbnailSize: thumbPixels,
+                isSelecting: isSelecting,
+                isSelected: selectedAssets.contains(asset.localIdentifier),
+                isFavorite: favoriteIDs.contains(asset.localIdentifier),
+                stackCount: stacks[asset.localIdentifier]?.count ?? 0,
+                stacks: stacks,
+                namespace: heroNS,
+                onToggleSelection: { toggleSelection(for: asset) },
+                onDelete: { deletePhoto(asset: asset) }
+            )
+            // Cascade the first screenful in when the reveal
+            // lifts; cells created later mount already-entered.
+            .opacity(entered ? 1 : 0)
+            .scaleEffect(entered ? 1 : 0.88)
+            .animation(
+                .spring(response: 0.5, dampingFraction: 0.8)
+                    .delay(min(Double(index) * 0.025, 0.45)),
+                value: entered
+            )
+            .overlay {
+                if index == hiddenIndex {
+                    HiddenCompanion(
+                        corner: daySeed % 4,
+                        kind: MascotKind(rawValue: mascotRaw) ?? .foldy,
+                        hat: HatKind(rawValue: hatRaw) ?? .none
+                    )
+                }
             }
-            .scrollIndicators(.hidden)
-            .refreshable { await onRefresh?() }
-            .ignoresSafeArea(edges: .bottom)
-            .task(id: assets.count) {
-                ThumbnailPrefetcher.shared.reset(assets: assets, targetSize: thumbPixels)
-            }
-            .onDisappear {
-                // Deliberately *not* dropping the thumbnail cache here.
-                // Pushing a photo fires the grid's onDisappear, and coming
-                // straight back to the grid is the single most likely next
-                // move — throwing the warm cache away at exactly that moment
-                // would undo the prefetch. PhotoKit evicts under memory
-                // pressure on its own; `reset(assets:targetSize:)` clears it
-                // when the day being shown actually changes.
-                scrollChrome.reset()
-            }
-            .onAppear {
-                if !isRevealActive { entered = true }
-            }
-            .onChange(of: isRevealActive) {
-                if !isRevealActive { entered = true }
-            }
+            // Cells are created as they scroll into view, which makes their
+            // appearance the cheapest possible "where is the reader" signal
+            // for decoding the next screenful ahead of them.
+            .onAppear { ThumbnailPrefetcher.shared.update(center: index) }
+        }
+    }
+
+    private func jump(_ proxy: ScrollViewProxy, chapters: [Chapter]) {
+        guard let year = jumpToYear else { return }
+        // Clear it whether or not the year exists, so a stale request can't
+        // yank the grid around later.
+        DispatchQueue.main.async { jumpToYear = nil }
+        guard chapters.contains(where: { $0.year == year }) else { return }
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) {
+            proxy.scrollTo(Chapter.anchor(year), anchor: .top)
         }
     }
     
@@ -1414,7 +1480,7 @@ private struct MemoriesGridView: View {
         }) { success, error in
             DispatchQueue.main.async {
                 if success {
-                    withAnimation {
+                    _ = withAnimation {
                         deletedAssets.insert(asset.localIdentifier)
                     }
                 }
@@ -1449,9 +1515,12 @@ private struct GridCellView: View {
     let assets: [PHAsset]
     let asset: PHAsset
     let cellSize: CGFloat
+    /// Chapter leads are wider than tall; everything else is square.
+    var cellHeight: CGFloat? = nil
     let thumbnailSize: CGSize
     let isSelecting: Bool
     let isSelected: Bool
+    var isFavorite: Bool = false
     /// Frames hidden behind this one in "Best of". 0 when it stands alone.
     var stackCount: Int = 0
     /// Forwarded to the pager so it can say the same thing full-screen.
@@ -1494,7 +1563,7 @@ private struct GridCellView: View {
                         Spacer()
                         ZStack {
                             Circle()
-                                .fill(isSelected ? Color.blue : Color.white.opacity(0.3))
+                                .fill(isSelected ? Theme.pink : Color.white.opacity(0.3))
                                 .frame(width: 28, height: 28)
 
                             if isSelected {
@@ -1519,7 +1588,7 @@ private struct GridCellView: View {
     private var cellContent: some View {
         ZStack {
             AssetThumbnailView(asset: asset, targetSize: thumbnailSize)
-                .frame(width: cellSize, height: cellSize)
+                .frame(width: cellSize, height: cellHeight ?? cellSize)
                 .clipped()
                 .opacity(isSelecting && !isSelected ? 0.6 : 1.0)
 
@@ -1545,26 +1614,28 @@ private struct GridCellView: View {
                 .allowsHitTesting(false)
             }
 
-            // Video play icon overlay
-            if asset.mediaType == .video {
+            // Heart and video length share the bottom-left corner, as in Photos.
+            if isFavorite || asset.mediaType == .video {
                 VStack {
                     Spacer()
-                    HStack {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.5), radius: 2)
-
-                        // Video duration
-                        Text(formatDuration(asset.duration))
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.5), radius: 2)
-
+                    HStack(spacing: 4) {
+                        if isFavorite {
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        if asset.mediaType == .video {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 14, weight: .bold))
+                            Text(formatDuration(asset.duration))
+                                .font(.system(size: 12, weight: .semibold))
+                        }
                         Spacer()
                     }
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.5), radius: 2)
                     .padding(6)
                 }
+                .allowsHitTesting(false)
             }
         }
     }
@@ -2466,7 +2537,7 @@ private struct PagedPhotoView: View {
 
 }
 
-final class MemoriesViewModel: ObservableObject {
+final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     enum State: Equatable {
         case needsPermission
         case denied
@@ -2501,9 +2572,33 @@ final class MemoriesViewModel: ObservableObject {
 
     @Published var state: State = .loading
 
+    /// When a day is empty: a handful of photos from the days either side of
+    /// it in past years. Offered as somewhere to go, never mixed into the
+    /// day itself — "on this day" stays honest.
+    @Published var nearby: [PHAsset] = []
+
+    /// The day currently loaded, so a library change can reload the right one.
+    private var currentDate = Date()
+    private var observing = false
+    private var changeReload: Task<Void, Never>?
+
     func start() {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         handle(status)
+    }
+
+    /// Photos changed underneath us — a delete or a heart in Photos.app, an
+    /// iCloud download, or our own favourite toggle. Debounced: a sync can
+    /// deliver dozens of these in a second.
+    nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
+        Task { @MainActor in
+            self.changeReload?.cancel()
+            self.changeReload = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard !Task.isCancelled else { return }
+                await self.reloadQuietly(for: self.currentDate)
+            }
+        }
     }
 
     func requestPermission() {
@@ -2522,6 +2617,10 @@ final class MemoriesViewModel: ObservableObject {
     private func handle(_ status: PHAuthorizationStatus) {
         switch status {
         case .authorized, .limited:
+            if !observing {
+                observing = true
+                PHPhotoLibrary.shared().register(self)
+            }
             loadOnThisDay()
         case .notDetermined:
             state = .needsPermission
@@ -2533,6 +2632,15 @@ final class MemoriesViewModel: ObservableObject {
     }
 
     private func loadOnThisDay() {
+        #if DEBUG
+        // Testing hook: LATENT_DATE=yyyy-MM-dd opens a day other than today,
+        // since a simulator library rarely has photos on the real date.
+        if let raw = ProcessInfo.processInfo.environment["LATENT_DATE"],
+           let forced = DayLink.dayFormatter.date(from: raw) {
+            loadMemoriesFor(date: forced)
+            return
+        }
+        #endif
         loadMemoriesFor(date: Date())
     }
     
@@ -2558,15 +2666,15 @@ final class MemoriesViewModel: ObservableObject {
     /// screen — for deletes, pull-to-refresh, and stale-data refreshes.
     func loadMemoriesFor(date: Date, quietly: Bool = false) {
         lastLoadAt = Date()
+        currentDate = date
         if !quietly { state = .loading }
         Task.detached(priority: .userInitiated) { [weak self] in
             let assets = Self.fetchMemories(for: date)
+            let nearby = assets.isEmpty ? Self.fetchNearby(for: date) : []
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                self.nearby = nearby
                 self.state = assets.isEmpty ? .empty : .loaded(assets)
-            }
-            if !assets.isEmpty {
-                await Self.updateWidget(count: assets.count, sampleFrom: assets)
             }
         }
     }
@@ -2575,50 +2683,47 @@ final class MemoriesViewModel: ObservableObject {
     @MainActor
     func reloadQuietly(for date: Date) async {
         lastLoadAt = Date()
-        let assets = await Task.detached(priority: .userInitiated) {
-            Self.fetchMemories(for: date)
+        currentDate = date
+        let (assets, nearby) = await Task.detached(priority: .userInitiated) {
+            let assets = Self.fetchMemories(for: date)
+            return (assets, assets.isEmpty ? Self.fetchNearby(for: date) : [])
         }.value
+        self.nearby = nearby
         state = assets.isEmpty ? .empty : .loaded(assets)
-        if !assets.isEmpty {
-            let snapshot = assets
-            Task.detached(priority: .utility) {
-                await Self.updateWidget(count: snapshot.count, sampleFrom: snapshot)
-            }
+    }
+
+    /// Keep the widget's next few days current. Only ever about *today* —
+    /// this used to run for whatever day was on screen, so jumping to March 3
+    /// in the date picker told the widget March 3 was today.
+    nonisolated static func refreshWidget(todayCount: Int) {
+        Task.detached(priority: .utility) {
+            await WidgetForecaster.refresh(todayCount: todayCount)
         }
     }
 
-    /// Widget upkeep, entirely off the main thread. The thumbnail render
-    /// used to be a synchronous PhotoKit request on the main actor on every
-    /// launch — a guaranteed hitch. Now: count is always cheap to write; the
-    /// thumbnail regenerates at most once per day; timelines reload only
-    /// when something actually changed.
-    nonisolated private static func updateWidget(count: Int, sampleFrom assets: [PHAsset]) async {
-        let ud = UserDefaults.standard
-        let lastCount = ud.integer(forKey: "widgetLastCount")
-        let today = Calendar.current.startOfDay(for: Date())
-        let lastThumbDay = ud.object(forKey: "widgetThumbDay") as? Date
-
-        let needsThumb = lastThumbDay.map { !Calendar.current.isDate($0, inSameDayAs: today) } ?? true
-        guard needsThumb || count != lastCount else { return }
-
-        SharedMemoriesManager.shared.saveMemoryCount(count)
-        if needsThumb {
-            // The widget used to show assets.randomElement() — a coin flip
-            // between the day's best photograph and a screenshot. Ask the
-            // curator for the best frame of the best moment instead, and fall
-            // back to the old behaviour only if curation has nothing to say.
-            let sample = await MomentCurator.shared.bestAsset(
-                in: assets, dayKey: MomentCurator.dayKey(for: Date())
-            ) ?? assets.randomElement()
-            // Only stamp the day as done if the thumbnail actually landed.
-            // Writing it unconditionally meant one failed fetch (an asset not
-            // yet downloaded from iCloud) pinned yesterday's photo for a day.
-            if let sample, SharedMemoriesManager.shared.saveWidgetThumbnail(from: sample) {
-                ud.set(today, forKey: "widgetThumbDay")
+    /// Up to `limit` photos from within three days of `date` in past years,
+    /// at most one per day, favourites first. Metadata only — this runs on
+    /// the empty-day path and must be instant.
+    nonisolated static func fetchNearby(for date: Date, limit: Int = 6) -> [PHAsset] {
+        let calendar = Calendar.current
+        var byDay: [String: [PHAsset]] = [:]
+        var order: [String] = []
+        for offset in [-1, 1, -2, 2, -3, 3] {
+            guard let near = calendar.date(byAdding: .day, value: offset, to: date) else { continue }
+            for asset in fetchMemories(for: near) where asset.mediaType == .image
+                && !asset.mediaSubtypes.contains(.photoScreenshot) {
+                guard let created = asset.creationDate else { continue }
+                let key = DayLink.dayFormatter.string(from: created)
+                if byDay[key] == nil { order.append(key) }
+                byDay[key, default: []].append(asset)
             }
         }
-        ud.set(count, forKey: "widgetLastCount")
-        WidgetCenter.shared.reloadAllTimelines()
+        // One photo per day, so six suggestions are six places to go.
+        let picks = order.compactMap { key -> PHAsset? in
+            guard let day = byDay[key] else { return nil }
+            return day.first(where: \.isFavorite) ?? day[day.count / 2]
+        }
+        return Array(picks.sorted { $0.isFavorite && !$1.isFavorite }.prefix(limit))
     }
 
     /// Year of the oldest photo or video in the library.
@@ -3008,7 +3113,6 @@ struct SettingsView: View {
     @ObservedObject var notificationManager: NotificationManager
     @Environment(\.dismiss) private var dismiss
     @AppStorage("shareWithFrame") private var shareWithFrame: Bool = true
-    @AppStorage("showFloatingYear") private var showFloatingYear: Bool = true
     @AppStorage("bestOfMode") private var bestOf: Bool = false
     @AppStorage(mascotStorageKey) private var mascotRaw = MascotKind.foldy.rawValue
     @AppStorage(hatStorageKey) private var hatRaw = HatKind.none.rawValue
@@ -3088,14 +3192,6 @@ struct SettingsView: View {
                     Text("Sharing")
                 } footer: {
                     Text("When on, shared photos include a branded card with the date. Turn off to share the original photo only.")
-                }
-
-                Section {
-                    Toggle("Floating Year", isOn: $showFloatingYear)
-                } header: {
-                    Text("Grid")
-                } footer: {
-                    Text("Show the year as a large overlay while scrolling through your memories.")
                 }
 
                 Section {

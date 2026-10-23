@@ -2429,6 +2429,11 @@ private struct PagedPhotoView: View {
     /// Which asset the currently-held bitmap belongs to.
     @State private var shownIdentifier: String?
     @State private var livePhoto: PHLivePhoto?
+    /// Which asset `livePhoto` was loaded for. The page view outlives the
+    /// asset it shows — choosing another frame from the moment strip swaps
+    /// `asset` in place — so the motion has to be keyed, or the strip's pick
+    /// plays the original frame's Live Photo.
+    @State private var livePhotoID: String?
     /// Non-nil while the Live Photo is playing, and how.
     @State private var liveStyle: PHLivePhotoViewPlaybackStyle?
 
@@ -2527,10 +2532,15 @@ private struct PagedPhotoView: View {
                                 }
                                 reportZoom()
                             }
-                            // Press and hold, as in Photos.
-                            .onLongPressGesture(minimumDuration: 0.3, maximumDistance: 12) {
-                                playLive(.full)
-                            }
+                            // Press and hold, as in Photos. Simultaneous, and only
+                            // switched on for Live Photos: an exclusive long press
+                            // on every photo made the double-tap and the swipe
+                            // wait to find out whether a hold was coming.
+                            .simultaneousGesture(
+                                LongPressGesture(minimumDuration: 0.3, maximumDistance: 12)
+                                    .onEnded { _ in playLive(.full) },
+                                including: asset.isLivePhoto ? .all : .none
+                            )
                             .overlay {
                                 if let livePhoto, let liveStyle {
                                     LivePhotoPlayer(livePhoto: livePhoto, style: liveStyle) {
@@ -2572,12 +2582,22 @@ private struct PagedPhotoView: View {
         // On arrival, a Live Photo stirs once — a silent half-second of the
         // motion around it, so you know there is more to hold for.
         .task(id: "\(asset.localIdentifier)|\(isCurrent)") {
+            if livePhotoID != asset.localIdentifier {
+                liveStyle = nil
+                livePhoto = nil
+                livePhotoID = nil
+            }
             guard isCurrent, asset.isLivePhoto else {
                 liveStyle = nil
                 return
             }
             if livePhoto == nil {
-                livePhoto = await LivePhotoLoader.load(asset, targetSize: CGSize(width: 2000, height: 2000))
+                let id = asset.localIdentifier
+                let loaded = await LivePhotoLoader.load(asset, targetSize: CGSize(width: 2000, height: 2000))
+                // The frame may have changed again while this loaded.
+                guard !Task.isCancelled, asset.localIdentifier == id else { return }
+                livePhoto = loaded
+                livePhotoID = id
             }
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled, isCurrent, liveStyle == nil else { return }
@@ -2648,7 +2668,8 @@ private struct PagedPhotoView: View {
     }
 
     private func playLive(_ style: PHLivePhotoViewPlaybackStyle) {
-        guard asset.isLivePhoto, livePhoto != nil, scale == 1, dragOffset == 0 else { return }
+        guard asset.isLivePhoto, livePhoto != nil, livePhotoID == asset.localIdentifier,
+              scale == 1, dragOffset == 0 else { return }
         if style == .full {
             // Same as video: the moment's sound plays even on silent.
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
@@ -2818,6 +2839,17 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
 
     /// The day currently loaded, so a library change can reload the right one.
     private var currentDate = Date()
+    /// What the published day looked like, so a reload that changes nothing
+    /// publishes nothing. See `reloadQuietly`.
+    private var lastSignature: [String] = []
+
+    /// Everything about a day the screen can show: which assets, in what
+    /// order, their hearts, and their edits.
+    nonisolated static func signature(of assets: [PHAsset]) -> [String] {
+        assets.map {
+            "\($0.localIdentifier)|\($0.isFavorite)|\($0.modificationDate?.timeIntervalSinceReferenceDate ?? 0)"
+        }
+    }
     private var observing = false
     private var changeReload: Task<Void, Never>?
 
@@ -2901,8 +2933,10 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
         Task.detached(priority: .userInitiated) { [weak self] in
             let assets = Self.fetchMemories(for: date)
             let nearby = assets.isEmpty ? Self.fetchNearby(for: date) : []
+            let signature = Self.signature(of: assets)
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                self.lastSignature = signature
                 self.nearby = nearby
                 self.state = assets.isEmpty ? .empty : .loaded(assets)
             }
@@ -2914,10 +2948,16 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
     func reloadQuietly(for date: Date) async {
         lastLoadAt = Date()
         currentDate = date
-        let (assets, nearby) = await Task.detached(priority: .userInitiated) {
+        let (assets, nearby, signature) = await Task.detached(priority: .userInitiated) {
             let assets = Self.fetchMemories(for: date)
-            return (assets, assets.isEmpty ? Self.fetchNearby(for: date) : [])
+            return (assets, assets.isEmpty ? Self.fetchNearby(for: date) : [], Self.signature(of: assets))
         }.value
+        // Photos reports changes almost continuously while iCloud syncs — and
+        // the app's own iCloud downloads (scoring, the widget) cause more.
+        // Publishing each one redrew the whole grid every half second, which
+        // is what made taps feel unresponsive. Only publish a real change.
+        guard signature != lastSignature || state == .loading else { return }
+        lastSignature = signature
         self.nearby = nearby
         state = assets.isEmpty ? .empty : .loaded(assets)
     }

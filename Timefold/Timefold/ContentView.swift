@@ -170,6 +170,71 @@ extension View {
     }
 }
 
+/// The zoom transition brings its own interactive dismiss: pinch in, or pull
+/// down, and the photo shrinks back into the grid. At 1x that's lovely. On a
+/// zoomed-in photo it fought our own pinch — zooming back out read as "go
+/// back to the grid". SwiftUI offers no switch for it, so while the photo is
+/// zoomed this turns off the system's pinch and pan recognizers above the
+/// pager (never SwiftUI's own, which drive our zoom and pan), and turns
+/// back on exactly the ones it turned off.
+struct ZoomDismissGate: UIViewRepresentable {
+    let blocked: Bool
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        let coordinator = context.coordinator
+        // A runloop later: on first mount the view isn't in the window yet.
+        DispatchQueue.main.async {
+            if blocked { coordinator.block(above: view) } else { coordinator.restore() }
+        }
+    }
+
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        coordinator.restore()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        private var disabled: [WeakRecognizer] = []
+
+        func block(above view: UIView) {
+            guard disabled.isEmpty else { return }
+            var ancestor = view.superview
+            while let current = ancestor {
+                for recognizer in current.gestureRecognizers ?? []
+                where Self.isSystemDismiss(recognizer) && recognizer.isEnabled {
+                    recognizer.isEnabled = false
+                    disabled.append(WeakRecognizer(recognizer))
+                }
+                ancestor = current.superview
+            }
+        }
+
+        func restore() {
+            disabled.forEach { $0.recognizer?.isEnabled = true }
+            disabled.removeAll()
+        }
+
+        private static func isSystemDismiss(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard recognizer is UIPinchGestureRecognizer || recognizer is UIPanGestureRecognizer else { return false }
+            let owner = NSStringFromClass(type(of: recognizer))
+            let delegate = recognizer.delegate.map { NSStringFromClass(type(of: $0)) } ?? ""
+            return !owner.contains("SwiftUI") && !delegate.contains("SwiftUI")
+        }
+    }
+
+    struct WeakRecognizer {
+        weak var recognizer: UIGestureRecognizer?
+        init(_ recognizer: UIGestureRecognizer) { self.recognizer = recognizer }
+    }
+}
+
 struct ContentView: View {
     @StateObject private var model = MemoriesViewModel()
     @StateObject private var notificationManager = NotificationManager()
@@ -2008,6 +2073,7 @@ private struct MemoryPagerView: View {
     var body: some View {
         ZStack {
             Color(uiColor: .systemBackground).ignoresSafeArea()
+                .background(ZoomDismissGate(blocked: isZoomed))
 
             TabView(selection: $selection) {
                 ForEach(Array(assets.enumerated()), id: \.element.localIdentifier) { index, asset in

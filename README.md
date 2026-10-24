@@ -3,8 +3,8 @@
 A privacy-first iOS app that shows you photos from this day in past years.
 
 <div align="center">
-  <img src="https://img.shields.io/badge/iOS-17.0+-blue.svg" />
-  <img src="https://img.shields.io/badge/Swift-5.9-orange.svg" />
+  <img src="https://img.shields.io/badge/iOS-26.2+-blue.svg" />
+  <img src="https://img.shields.io/badge/Swift-5-orange.svg" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" />
 </div>
 
@@ -18,13 +18,15 @@ Every day, Latent shows you photos taken on this date in previous years from you
 
 ## ✨ Features
 
-- 📅 **Daily Memories** - Automatically shows photos from today's date in past years
-- 🔒 **100% Private** - No accounts, no analytics, no data collection
-- 📱 **Offline First** - Works entirely on your device using Apple Photos
-- 🎨 **Two View Modes** - Switch between grid and fullscreen viewing
-- 📸 **Instagram Story Ready** - Share memories with beautiful gradient backgrounds
-- 🌓 **Dark Mode** - Full support with custom dark mode icon
-- ⚡ **Fast & Lightweight** - Native SwiftUI, no dependencies
+- 📅 **On this day** — photos from today's date in every past year, one chapter per year
+- ✨ **Best of** — near-identical shots collapse into one card, chosen on-device with Vision
+- 🎞️ **Live Photos** — press and hold to play
+- ❤️ **Favorites** — heart a photo in Latent and it's favorited in Photos, and leads its year
+- 🃏 **Daily reveal** — five polaroids from five years, with a special reveal on big anniversaries
+- 🧩 **Widgets** — small, medium, large and Lock Screen; turns over at midnight on its own
+- 🔔 **Reminders** — only on days worth it, with the photo they're about
+- 🐣 **Companions** — Foldy, Luna and Mochi, with hats earned by visiting and seasonal hats
+- 🔒 **100% private** — no accounts, no analytics, nothing leaves the device
 
 ## 🎯 Privacy First
 
@@ -38,9 +40,8 @@ Every day, Latent shows you photos taken on this date in previous years from you
 
 ### Requirements
 
-- iOS 17.0+
-- Xcode 15.0+
-- Swift 5.9+
+- iOS 26.2+
+- Xcode 26+
 
 ### Building
 
@@ -68,14 +69,13 @@ Latent is built with:
 
 ### Key Components
 
-- `ContentView.swift` - Main app interface with view mode toggling
-- `MemoriesViewModel` - Photo fetching and filtering logic
-- `MemoryPagerView` - Fullscreen photo viewing with sharing
-- `MemoriesGridView` - Grid layout with delete functionality
-
-## 📸 Screenshots
-
-*Add your App Store screenshots here*
+- `ContentView.swift` — the main screen, grid, photo pager, reveal, settings and companions
+- `Chapters.swift` — splits a day into year chapters
+- `MomentCuration.swift` — groups near-duplicates and picks the best frame (Vision, on-device)
+- `LivePhoto.swift` — Live Photo playback in the pager
+- `WidgetForecast.swift` — precomputes the next few days for the widget
+- `DeepLink.swift` — `latent://day/yyyy-MM-dd?year=N`, used by the widget and notifications
+- `TimefoldWidget/` — the widget extension
 
 ## 🤝 Contributing
 

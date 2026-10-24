@@ -174,9 +174,8 @@ extension View {
 /// down, and the photo shrinks back into the grid. At 1x that's lovely. On a
 /// zoomed-in photo it fought our own pinch — zooming back out read as "go
 /// back to the grid". SwiftUI offers no switch for it, so while the photo is
-/// zoomed this turns off the system's pinch and pan recognizers above the
-/// pager (never SwiftUI's own, which drive our zoom and pan), and turns
-/// back on exactly the ones it turned off.
+/// zoomed this turns off the transition's dismiss recognizers above the
+/// pager, and turns back on exactly the ones it turned off.
 struct ZoomDismissGate: UIViewRepresentable {
     let blocked: Bool
 
@@ -221,11 +220,13 @@ struct ZoomDismissGate: UIViewRepresentable {
             disabled.removeAll()
         }
 
+        /// UIKit names them: `…ZoomInteractiveDismissPinch`, `…SwipeDown` and
+        /// `…LeadingEdgePan`, on the pushed page's hosting view (dumped from
+        /// a probe app on iOS 26.5). Matched by name because the pinch isn't a
+        /// UIPinchGestureRecognizer at all — build 69 filtered on type and
+        /// missed it.
         private static func isSystemDismiss(_ recognizer: UIGestureRecognizer) -> Bool {
-            guard recognizer is UIPinchGestureRecognizer || recognizer is UIPanGestureRecognizer else { return false }
-            let owner = NSStringFromClass(type(of: recognizer))
-            let delegate = recognizer.delegate.map { NSStringFromClass(type(of: $0)) } ?? ""
-            return !owner.contains("SwiftUI") && !delegate.contains("SwiftUI")
+            recognizer.name?.hasPrefix("com.apple.UIKit.ZoomInteractiveDismiss") == true
         }
     }
 

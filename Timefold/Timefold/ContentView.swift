@@ -7,6 +7,7 @@ import UserNotifications
 import WidgetKit
 import AVKit
 import CoreImage
+import os
 
 // MARK: - Theme
 // Single source of truth for Latent's visual identity: warm, tactile,
@@ -311,7 +312,10 @@ struct ContentView: View {
         }
         .onReceive(DeepLinkRouter.shared.$pending) { link in
             guard let link else { return }
-            DeepLinkRouter.shared.pending = nil
+            // Cleared on the next turn: @Published delivers in willSet, so a
+            // nil written from inside this handler is overwritten by the very
+            // assignment being delivered, and the link would linger.
+            DispatchQueue.main.async { DeepLinkRouter.shared.pending = nil }
             open(link)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
@@ -728,8 +732,9 @@ struct ContentView: View {
     /// badge, the pager's indicator, and the filmstrip behind it.
     private var stacks: [String: [PHAsset]] {
         guard bestOf, canShowBestOf else { return [:] }
-        return Dictionary(uniqueKeysWithValues:
-            moments.filter(\.isStack).map { ($0.pick.localIdentifier, $0.members) })
+        return Dictionary(
+            moments.filter(\.isStack).map { ($0.pick.localIdentifier, $0.members) },
+            uniquingKeysWith: { first, _ in first })
     }
 
     /// Only offer the toggle once curation has produced something we believe.
@@ -1504,8 +1509,11 @@ private struct MemoriesGridView: View {
             // Reading order — what the pager swipes through, and what the
             // prefetcher warms. Leads come first within their year.
             let ordered = chapters.flatMap(\.items)
-            let position = Dictionary(uniqueKeysWithValues:
-                ordered.enumerated().map { ($0.element.localIdentifier, $0.offset) })
+            // Not uniqueKeysWithValues: that traps on a repeated asset, and a
+            // grid is no reason to crash.
+            let position = Dictionary(
+                ordered.enumerated().map { ($0.element.localIdentifier, $0.offset) },
+                uniquingKeysWith: { first, _ in first })
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -1733,6 +1741,10 @@ private struct GridCellView: View {
             AssetThumbnailView(asset: asset, targetSize: thumbnailSize)
                 .frame(width: cellSize, height: cellHeight ?? cellSize)
                 .clipped()
+                // `clipped()` trims the drawing, not the touch area: a
+                // scaled-to-fill thumbnail still answered taps out past its
+                // cell, over its neighbours — and over the chapter headers.
+                .contentShape(Rectangle())
                 .opacity(isSelecting && !isSelected ? 0.6 : 1.0)
 
             // "N more like this" — the frames this pick stands in for.
@@ -2473,6 +2485,20 @@ private struct PagedPhotoView: View {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
+                            // Before the zoom, so the motion scales with the
+                            // still. Laid on top of it afterwards, the player
+                            // stayed at 1x while the pinch zoomed the photo
+                            // behind it — it looked like the pinch was zooming
+                            // the backdrop, until the hint ended.
+                            .overlay {
+                                if let livePhoto, let liveStyle {
+                                    LivePhotoPlayer(livePhoto: livePhoto, style: liveStyle) {
+                                        withAnimation(.easeOut(duration: 0.25)) { self.liveStyle = nil }
+                                    }
+                                    .allowsHitTesting(false)
+                                    .transition(.opacity)
+                                }
+                            }
                             .scaleEffect(scale)
                             .offset(offset)
                             // Pan takes priority over the TabView's paging swipe, but
@@ -2494,6 +2520,9 @@ private struct PagedPhotoView: View {
                                 MagnifyGesture()
                                     .onChanged { value in
                                         guard dragOffset == 0 else { return }
+                                        // A pinch is a request to look closer
+                                        // at the still; stop the motion.
+                                        if liveStyle != nil { liveStyle = nil }
                                         let newScale = lastScale * value.magnification
                                         scale = min(max(newScale, 1.0), 4.0)
                                         // Keep the pan inside bounds as we zoom out.
@@ -2513,6 +2542,7 @@ private struct PagedPhotoView: View {
                             )
                             .onTapGesture(count: 2) { location in
                                 guard dragOffset == 0 else { return }
+                                liveStyle = nil
                                 withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
                                     if scale > 1.0 {
                                         scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero
@@ -2541,15 +2571,6 @@ private struct PagedPhotoView: View {
                                     .onEnded { _ in playLive(.full) },
                                 including: asset.isLivePhoto ? .all : .none
                             )
-                            .overlay {
-                                if let livePhoto, let liveStyle {
-                                    LivePhotoPlayer(livePhoto: livePhoto, style: liveStyle) {
-                                        withAnimation(.easeOut(duration: 0.25)) { self.liveStyle = nil }
-                                    }
-                                    .allowsHitTesting(false)
-                                    .transition(.opacity)
-                                }
-                            }
                             .onChange(of: dragOffset) {
                                 if dragOffset > 0 && scale != 1.0 {
                                     withAnimation(.spring(response: 0.2)) {
@@ -2844,12 +2865,16 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
     private var lastSignature: [String] = []
 
     /// Everything about a day the screen can show: which assets, in what
-    /// order, their hearts, and their edits.
+    /// order, and their hearts. Not `modificationDate` — Photos bumps it for
+    /// its own bookkeeping (analysis, sync) on photos nobody touched.
     nonisolated static func signature(of assets: [PHAsset]) -> [String] {
-        assets.map {
-            "\($0.localIdentifier)|\($0.isFavorite)|\($0.modificationDate?.timeIntervalSinceReferenceDate ?? 0)"
-        }
+        assets.map { "\($0.localIdentifier)|\($0.isFavorite)" }
     }
+
+    /// The fetch behind the day on screen. A library change that doesn't
+    /// touch it — which, mid-sync, is nearly all of them — is dropped before
+    /// it costs a refetch.
+    private nonisolated let watched = OSAllocatedUnfairLock<PHFetchResult<PHAsset>?>(uncheckedState: nil)
     private var observing = false
     private var changeReload: Task<Void, Never>?
 
@@ -2862,6 +2887,8 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
     /// iCloud download, or our own favourite toggle. Debounced: a sync can
     /// deliver dozens of these in a second.
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
+        if let fetch = watched.withLockUnchecked({ $0 }),
+           changeInstance.changeDetails(for: fetch) == nil { return }
         Task { @MainActor in
             self.changeReload?.cancel()
             self.changeReload = Task { @MainActor in
@@ -2931,7 +2958,7 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
         currentDate = date
         if !quietly { state = .loading }
         Task.detached(priority: .userInitiated) { [weak self] in
-            let assets = Self.fetchMemories(for: date)
+            let assets = self?.fetchWatched(for: date) ?? []
             let nearby = assets.isEmpty ? Self.fetchNearby(for: date) : []
             let signature = Self.signature(of: assets)
             await MainActor.run { [weak self] in
@@ -2948,8 +2975,8 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
     func reloadQuietly(for date: Date) async {
         lastLoadAt = Date()
         currentDate = date
-        let (assets, nearby, signature) = await Task.detached(priority: .userInitiated) {
-            let assets = Self.fetchMemories(for: date)
+        let (assets, nearby, signature) = await Task.detached(priority: .userInitiated) { [self] in
+            let assets = self.fetchWatched(for: date)
             return (assets, assets.isEmpty ? Self.fetchNearby(for: date) : [], Self.signature(of: assets))
         }.value
         // Photos reports changes almost continuously while iCloud syncs — and
@@ -3033,7 +3060,23 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
         return year
     }
 
+    /// `fetchMemories`, remembering the fetch so changes can be checked
+    /// against it.
+    private nonisolated func fetchWatched(for date: Date) -> [PHAsset] {
+        let results = Self.fetchResult(for: date)
+        watched.withLockUnchecked { $0 = results }
+        guard let results, results.count > 0 else { return [] }
+        return results.objects(at: IndexSet(integersIn: 0..<results.count))
+    }
+
     nonisolated static func fetchMemories(for date: Date) -> [PHAsset] {
+        guard let results = fetchResult(for: date), results.count > 0 else { return [] }
+        // One batched trip across the PhotoKit boundary instead of `count`
+        // individual `object(at:)` calls.
+        return results.objects(at: IndexSet(integersIn: 0..<results.count))
+    }
+
+    nonisolated static func fetchResult(for date: Date) -> PHFetchResult<PHAsset>? {
         let calendar = Calendar.current
         let day = calendar.component(.day, from: date)
         let month = calendar.component(.month, from: date)
@@ -3052,7 +3095,7 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
                 NSPredicate(format: "creationDate >= %@ AND creationDate < %@", start as NSDate, end as NSDate)
             )
         }
-        guard !datePredicates.isEmpty else { return [] }
+        guard !datePredicates.isEmpty else { return nil }
 
         let opts = PHFetchOptions()
         opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
@@ -3062,11 +3105,7 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
             NSCompoundPredicate(orPredicateWithSubpredicates: datePredicates)
         ])
 
-        let results = PHAsset.fetchAssets(with: opts)
-        guard results.count > 0 else { return [] }
-        // One batched trip across the PhotoKit boundary instead of `count`
-        // individual `object(at:)` calls.
-        return results.objects(at: IndexSet(integersIn: 0..<results.count))
+        return PHAsset.fetchAssets(with: opts)
     }
 }
 

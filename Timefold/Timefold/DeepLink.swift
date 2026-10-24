@@ -70,23 +70,37 @@ final class DeepLinkRouter: ObservableObject {
 
 /// Routes notification taps into the router. Retained by the app for its
 /// whole lifetime — `UNUserNotificationCenter.delegate` is weak.
+///
+/// Completion-handler forms, not the `async` ones, and the handler is always
+/// called on the main thread. The async `didReceive` returns — and so calls
+/// the system's completion handler — from whatever thread the task finished
+/// on; UIKit then touches the scene off the main thread, and the app dies
+/// the moment someone taps a notification (build 66/67, reported in
+/// TestFlight).
 final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationRouter()
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
-        guard let link = DayLink(userInfo: response.notification.request.content.userInfo) else { return }
-        await MainActor.run { DeepLinkRouter.shared.pending = link }
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                if let link = DayLink(userInfo: userInfo) { DeepLinkRouter.shared.pending = link }
+            }
+            completionHandler()
+        }
     }
 
     /// Arriving while Latent is already open: show it anyway, quietly.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        [.banner, .list]
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        DispatchQueue.main.async { completionHandler([.banner, .list]) }
     }
 }
 

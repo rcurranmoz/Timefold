@@ -103,6 +103,14 @@ nonisolated enum CurationTuning {
     /// How much being flagged `isUtility` costs a frame when picking a winner.
     /// Large enough that a screenshot never beats a real photograph.
     static let utilityPenalty: Float = 10
+
+    /// What a heart in Photos is worth when picking a winner. Aesthetics scores
+    /// cluster in 0.4-0.6, so anything above ~0.5 means "the photo you loved
+    /// always beats the photo Vision liked" — which is the right order. A
+    /// person's own favourite is the strongest signal this app will ever get.
+    /// Deliberately smaller than `utilityPenalty`: a favourited receipt is
+    /// still a receipt as far as the reveal is concerned.
+    static let favoriteBonus: Float = 1
 }
 
 // MARK: - Persisted grouping
@@ -189,13 +197,22 @@ actor MomentCurator {
         if let cached = dayCache[dayKey], cached.fingerprint == print,
            let replayed = Self.rebuild(cached, from: assets) {
             visionAvailable = cached.visionBacked
-            return replayed
+            // The grouping is cached; the pick is re-decided. Favourites can
+            // change without the asset set changing, and the pick must follow.
+            return replayed.map { Moment(pick: best(of: $0.members), members: $0.members) }
         }
 
-        if printsDayKey != dayKey {
+        // Prints used to be dropped whenever a different day was curated. Now
+        // that the widget forecast curates tomorrow while the UI curates
+        // today, two passes can interleave at an `await` — and clearing here
+        // would pull one day's prints out from under the other mid-group.
+        // Bound the cache by size instead; clearing `attempted` alongside
+        // lets the cleared assets be re-scored if they are needed again.
+        if prints.count > 1500 {
             prints.removeAll(keepingCapacity: true)
-            printsDayKey = dayKey
+            attempted.removeAll(keepingCapacity: true)
         }
+        printsDayKey = dayKey
 
         await ensureScored(assets)
         let grouped = group(assets)
@@ -275,14 +292,7 @@ actor MomentCurator {
         let moments = await moments(for: assets, dayKey: dayKey)
         guard !moments.isEmpty else { return Array(assets.prefix(limit)) }
 
-        let calendar = Calendar.current
-        var bestByYear: [Int: Moment] = [:]
-        for moment in moments {
-            guard let date = moment.date else { continue }
-            let year = calendar.component(.year, from: date)
-            if let held = bestByYear[year], rank(of: held.pick) >= rank(of: moment.pick) { continue }
-            bestByYear[year] = moment
-        }
+        let bestByYear = bestMomentByYear(moments)
 
         // Newest year first, matching the order the rest of the app reads in.
         var fan = bestByYear.keys.sorted(by: >).compactMap { bestByYear[$0]?.pick }
@@ -296,6 +306,55 @@ actor MomentCurator {
             fan.append(contentsOf: rest.prefix(limit - fan.count))
         }
         return Array(fan.prefix(limit))
+    }
+
+    /// Year -> localIdentifier of that year's strongest frame. Leads each
+    /// chapter of the grid, and picks the widget's other years.
+    func yearLeads(for assets: [PHAsset], dayKey: String) async -> [Int: String] {
+        let moments = await moments(for: assets, dayKey: dayKey)
+        return bestMomentByYear(moments).mapValues(\.pick.localIdentifier)
+    }
+
+    /// Years ranked by how strong their best frame is, strongest first, each
+    /// with that frame. What the widget and notifications choose from.
+    func rankedYears(for assets: [PHAsset], dayKey: String) async -> [(year: Int, asset: PHAsset)] {
+        let moments = await moments(for: assets, dayKey: dayKey)
+        return bestMomentByYear(moments)
+            .map { (year: $0.key, asset: $0.value.pick) }
+            // Ties broken by year so the order is the same on every call —
+            // the widget names its files after these picks.
+            .sorted { (rank(of: $0.asset), $0.year) > (rank(of: $1.asset), $1.year) }
+    }
+
+    private func bestMomentByYear(_ moments: [Moment]) -> [Int: Moment] {
+        let calendar = Calendar.current
+        var bestByYear: [Int: Moment] = [:]
+        for moment in moments {
+            guard let date = moment.date else { continue }
+            let year = calendar.component(.year, from: date)
+            if let held = bestByYear[year], rank(of: held.pick) >= rank(of: moment.pick) { continue }
+            bestByYear[year] = moment
+        }
+        return bestByYear
+    }
+
+    /// Best guess from what is already known — cached scores and favourites,
+    /// no decoding. For callers that cannot afford a pass (thirty days of
+    /// notifications), and for whom "pretty good, never a screenshot" is the bar.
+    func quickPick(from assets: [PHAsset]) -> PHAsset? {
+        loadScoresIfNeeded()
+        let photos = assets.filter {
+            $0.mediaType == .image && !$0.mediaSubtypes.contains(.photoScreenshot)
+        }
+        let pool = photos.isEmpty ? assets : photos
+        if let known = pool.filter({ scores[$0.localIdentifier] != nil || $0.isFavorite })
+            .max(by: { rank(of: $0) < rank(of: $1) }),
+           rank(of: known) > 0 {
+            return known
+        }
+        // Nothing scored: the middle of the day's frames, which dodges the
+        // first and last shots of a burst more often than not.
+        return pool.isEmpty ? nil : pool[pool.count / 2]
     }
 
     /// The single best frame of a day — what the widget wants.
@@ -502,8 +561,9 @@ actor MomentCurator {
     /// Higher is better. Unscored assets (videos, failures) sit at neutral so
     /// they neither win nor lose against a photograph on a technicality.
     private func rank(of asset: PHAsset) -> Float {
-        guard let score = scores[asset.localIdentifier] else { return 0 }
-        return score.aesthetics - (score.isUtility ? CurationTuning.utilityPenalty : 0)
+        let favorite = asset.isFavorite ? CurationTuning.favoriteBonus : 0
+        guard let score = scores[asset.localIdentifier] else { return favorite }
+        return score.aesthetics + favorite - (score.isUtility ? CurationTuning.utilityPenalty : 0)
     }
 
     // MARK: Persistence

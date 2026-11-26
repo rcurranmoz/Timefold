@@ -17,7 +17,6 @@ import AVFoundation
 /// sheet keep working exactly as they do for any photo.
 struct LivePhotoPlayer: UIViewRepresentable {
     let livePhoto: PHLivePhoto
-    let style: PHLivePhotoViewPlaybackStyle
     let onEnd: () -> Void
 
     func makeUIView(context: Context) -> PHLivePhotoView {
@@ -25,12 +24,10 @@ struct LivePhotoPlayer: UIViewRepresentable {
         view.contentMode = .scaleAspectFit
         view.livePhoto = livePhoto
         view.delegate = context.coordinator
-        // The hint is a silent shimmer; full playback has sound.
-        view.isMuted = style == .hint
         // Our own long-press drives playback; the built-in one would fight
         // the pager's gestures.
         view.playbackGestureRecognizer.isEnabled = false
-        view.startPlayback(with: style)
+        view.startPlayback(with: .full)
         return view
     }
 

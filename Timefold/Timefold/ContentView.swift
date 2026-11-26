@@ -374,6 +374,14 @@ struct ContentView: View {
             // Refresh on foreground only when the day rolled or the data is
             // stale — hopping between apps shouldn't reload every time.
             VisitTracker.recordVisit()
+            // Left on today, back on a later day: today has moved. Without
+            // this the rollover reload fetched yesterday, racing the
+            // notification's load of today.
+            if DebugOverrides.forcedToday == nil, let last = model.lastLoadAt,
+               !Calendar.current.isDateInToday(last),
+               Calendar.current.isDate(selectedDate, inSameDayAs: last) {
+                selectedDate = Date()
+            }
             model.refreshIfNeeded(for: selectedDate)
         }
         .onReceive(DeepLinkRouter.shared.$pending) { link in
@@ -720,6 +728,11 @@ struct ContentView: View {
         let trustworthy = await MomentCurator.shared.visionAvailable
         let fan = await MomentCurator.shared.revealFan(for: assets, dayKey: dayKey)
         let leads = await MomentCurator.shared.yearLeads(for: assets, dayKey: dayKey)
+        // The day or its photos changed while this ran (the task was
+        // replaced). Writing anyway filed one day's picks under another, and
+        // `displayed()` then matched none of them: an empty grid.
+        guard !Task.isCancelled, case .loaded(let now) = model.state, now.count == assets.count,
+              dayKey == MomentCurator.dayKey(for: selectedDate) else { return }
         moments = result
         momentsAreTrustworthy = trustworthy
         revealFan = fan
@@ -2482,6 +2495,14 @@ private struct MemoryPagerView: View {
     }
 }
 
+/// What decides whether a page should be fetching its Live Photo.
+private struct LiveLoadKey: Equatable {
+    let asset: String
+    let isCurrent: Bool
+    let isSharp: Bool
+    let isWanted: Bool
+}
+
 private struct PagedPhotoView: View {
     let asset: PHAsset
     var isNearSelection: Bool = true
@@ -2513,8 +2534,14 @@ private struct PagedPhotoView: View {
     /// `asset` in place — so the motion has to be keyed, or the strip's pick
     /// plays the original frame's Live Photo.
     @State private var livePhotoID: String?
-    /// Non-nil while the Live Photo is playing, and how.
-    @State private var liveStyle: PHLivePhotoViewPlaybackStyle?
+    @State private var isPlayingLive = false
+    /// The asset whose Live Photo was asked for before it had loaded. It
+    /// plays as soon as it lands.
+    @State private var wantsLive: String?
+    /// Which asset's full-quality bitmap has landed.
+    @State private var sharpID: String?
+    /// The soft first rendition, fading out over the sharp one.
+    @State private var outgoing: UIImage?
 
     var body: some View {
         GeometryReader { geo in
@@ -2556,11 +2583,18 @@ private struct PagedPhotoView: View {
                             // still. Laid on top of it afterwards, the player
                             // stayed at 1x while the pinch zoomed the photo
                             // behind it — it looked like the pinch was zooming
-                            // the backdrop, until the hint ended.
+                            // the backdrop, until playback ended.
                             .overlay {
-                                if let livePhoto, let liveStyle {
-                                    LivePhotoPlayer(livePhoto: livePhoto, style: liveStyle) {
-                                        withAnimation(.easeOut(duration: 0.25)) { self.liveStyle = nil }
+                                if let outgoing {
+                                    Image(uiImage: outgoing)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .allowsHitTesting(false)
+                                        .transition(.opacity)
+                                }
+                                if let livePhoto, isPlayingLive {
+                                    LivePhotoPlayer(livePhoto: livePhoto) {
+                                        withAnimation(.easeOut(duration: 0.25)) { isPlayingLive = false }
                                     }
                                     .allowsHitTesting(false)
                                     .transition(.opacity)
@@ -2589,7 +2623,8 @@ private struct PagedPhotoView: View {
                                         guard dragOffset == 0 else { return }
                                         // A pinch is a request to look closer
                                         // at the still; stop the motion.
-                                        if liveStyle != nil { liveStyle = nil }
+                                        if isPlayingLive { isPlayingLive = false }
+                                        wantsLive = nil
                                         let newScale = lastScale * value.magnification
                                         scale = min(max(newScale, 1.0), 4.0)
                                         // Keep the pan inside bounds as we zoom out.
@@ -2609,7 +2644,8 @@ private struct PagedPhotoView: View {
                             )
                             .onTapGesture(count: 2) { location in
                                 guard dragOffset == 0 else { return }
-                                liveStyle = nil
+                                isPlayingLive = false
+                                wantsLive = nil
                                 withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
                                     if scale > 1.0 {
                                         scale = 1.0; lastScale = 1.0; offset = .zero; lastOffset = .zero
@@ -2635,7 +2671,7 @@ private struct PagedPhotoView: View {
                             // wait to find out whether a hold was coming.
                             .simultaneousGesture(
                                 LongPressGesture(minimumDuration: 0.3, maximumDistance: 12)
-                                    .onEnded { _ in playLive(.full) },
+                                    .onEnded { _ in playLive() },
                                 including: asset.isLivePhoto ? .all : .none
                             )
                             .onChange(of: dragOffset) {
@@ -2656,8 +2692,8 @@ private struct PagedPhotoView: View {
             .background(ambientBackdrop)
             .overlay(alignment: .topLeading) {
                 if asset.isLivePhoto, isCurrent, scale == 1, dragOffset == 0 {
-                    Button { playLive(.full) } label: {
-                        LiveBadge(isPlaying: liveStyle == .full)
+                    Button { playLive() } label: {
+                        LiveBadge(isPlaying: isPlayingLive || wantsLive == asset.localIdentifier)
                     }
                     .buttonStyle(.plain)
                     .padding(.leading)
@@ -2667,29 +2703,45 @@ private struct PagedPhotoView: View {
                 }
             }
         }
-        // On arrival, a Live Photo stirs once — a silent half-second of the
-        // motion around it, so you know there is more to hold for.
-        .task(id: "\(asset.localIdentifier)|\(isCurrent)") {
-            if livePhotoID != asset.localIdentifier {
-                liveStyle = nil
+        // Live Photos play when asked — a hold, or the LIVE badge — and never
+        // by themselves: motion on every tap got in the way of looking. The
+        // motion is fetched quietly once the still is sharp and the reader has
+        // settled on it, so it neither competes with the photo nor downloads
+        // for every page swiped past. Asking sooner fetches it at once.
+        .task(id: LiveLoadKey(asset: asset.localIdentifier, isCurrent: isCurrent,
+                              isSharp: sharpID == asset.localIdentifier,
+                              isWanted: wantsLive == asset.localIdentifier)) {
+            let id = asset.localIdentifier
+            if livePhotoID != id {
+                isPlayingLive = false
                 livePhoto = nil
                 livePhotoID = nil
             }
             guard isCurrent, asset.isLivePhoto else {
-                liveStyle = nil
+                isPlayingLive = false
+                wantsLive = nil
                 return
             }
             if livePhoto == nil {
-                let id = asset.localIdentifier
+                if wantsLive != id {
+                    guard sharpID == id else { return }
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard !Task.isCancelled else { return }
+                }
                 let loaded = await LivePhotoLoader.load(asset, targetSize: CGSize(width: 2000, height: 2000))
                 // The frame may have changed again while this loaded.
                 guard !Task.isCancelled, asset.localIdentifier == id else { return }
+                guard let loaded else {
+                    wantsLive = nil
+                    return
+                }
                 livePhoto = loaded
                 livePhotoID = id
             }
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            guard !Task.isCancelled, isCurrent, liveStyle == nil else { return }
-            playLive(.hint)
+            if wantsLive == id {
+                wantsLive = nil
+                playLive()
+            }
         }
         // Keyed on the asset as well as proximity: the filmstrip can swap which
         // frame a page shows without the page moving, and an id of proximity
@@ -2700,6 +2752,8 @@ private struct PagedPhotoView: View {
                 // full-resolution bitmap.
                 image = nil
                 backdrop = nil
+                outgoing = nil
+                sharpID = nil
                 shownIdentifier = nil
                 return
             }
@@ -2711,6 +2765,7 @@ private struct PagedPhotoView: View {
                     image = nil
                     backdrop = nil
                 }
+                outgoing = nil
                 shownIdentifier = asset.localIdentifier
                 await loadFull()
             } else if image == nil {
@@ -2755,19 +2810,21 @@ private struct PagedPhotoView: View {
         onZoomChanged(scale > 1.0)
     }
 
-    private func playLive(_ style: PHLivePhotoViewPlaybackStyle) {
-        guard asset.isLivePhoto, livePhoto != nil, livePhotoID == asset.localIdentifier,
-              scale == 1, dragOffset == 0 else { return }
-        if style == .full {
-            // Same as video: the moment's sound plays even on silent.
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-            try? AVAudioSession.sharedInstance().setActive(true)
-            Haptics.tap(.soft)
+    private func playLive() {
+        guard asset.isLivePhoto, scale == 1, dragOffset == 0 else { return }
+        guard livePhoto != nil, livePhotoID == asset.localIdentifier else {
+            // Still on its way: fetch now, play on arrival.
+            wantsLive = asset.localIdentifier
+            return
         }
+        // Same as video: the moment's sound plays even on silent.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        Haptics.tap(.soft)
         // Remount for every play — PHLivePhotoView starts in makeUIView.
-        liveStyle = nil
+        isPlayingLive = false
         DispatchQueue.main.async {
-            withAnimation(.easeIn(duration: 0.12)) { liveStyle = style }
+            withAnimation(.easeIn(duration: 0.12)) { isPlayingLive = true }
         }
     }
 
@@ -2838,8 +2895,19 @@ private struct PagedPhotoView: View {
                 // A request in flight when the frame changed must not paint over
                 // the frame that replaced it.
                 guard self.shownIdentifier == asset.localIdentifier else { return }
+                // Soft to sharp as a short dissolve rather than a snap. Only
+                // between renditions of one photo: a frame chosen from the
+                // strip replaces a different picture.
+                if !isPlaceholder, !prefersSharp, let soft = self.image,
+                   self.sharpID != asset.localIdentifier {
+                    self.outgoing = soft
+                    DispatchQueue.main.async {
+                        withAnimation(.easeOut(duration: 0.2)) { self.outgoing = nil }
+                    }
+                }
                 self.image = img
                 if !isPlaceholder {
+                    self.sharpID = asset.localIdentifier
                     // The share sheet renders from this bitmap — only ever
                     // publish the real one, never the placeholder.
                     self.onImageReady(img)
@@ -2930,6 +2998,10 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
     /// What the published day looked like, so a reload that changes nothing
     /// publishes nothing. See `reloadQuietly`.
     private var lastSignature: [String] = []
+    /// Bumped by every load. Loads run off the main thread and can overlap —
+    /// resuming on a new day starts one for the stale date and another for
+    /// today — so only the newest is allowed to publish.
+    private var generation = 0
 
     /// Everything about a day the screen can show: which assets, in what
     /// order, and their hearts. Not `modificationDate` — Photos bumps it for
@@ -3001,7 +3073,7 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
     }
     
     /// Wall-clock of the last load kick-off — powers the foreground throttle.
-    private var lastLoadAt: Date?
+    private(set) var lastLoadAt: Date?
 
     /// Foreground refresh. A full reload blows the UI away, so rapid app
     /// switching shouldn't trigger one: only reload when the calendar day
@@ -3023,13 +3095,16 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
     func loadMemoriesFor(date: Date, quietly: Bool = false) {
         lastLoadAt = Date()
         currentDate = date
+        generation += 1
+        let ticket = generation
         if !quietly { state = .loading }
         Task.detached(priority: .userInitiated) { [weak self] in
-            let assets = self?.fetchWatched(for: date) ?? []
+            let (fetch, assets) = Self.fetchWatched(for: date)
             let nearby = assets.isEmpty ? Self.fetchNearby(for: date) : []
             let signature = Self.signature(of: assets)
             await MainActor.run { [weak self] in
-                guard let self else { return }
+                guard let self, ticket == self.generation else { return }
+                self.watched.withLockUnchecked { $0 = fetch }
                 self.lastSignature = signature
                 self.nearby = nearby
                 self.state = assets.isEmpty ? .empty : .loaded(assets)
@@ -3042,10 +3117,14 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
     func reloadQuietly(for date: Date) async {
         lastLoadAt = Date()
         currentDate = date
-        let (assets, nearby, signature) = await Task.detached(priority: .userInitiated) { [self] in
-            let assets = self.fetchWatched(for: date)
-            return (assets, assets.isEmpty ? Self.fetchNearby(for: date) : [], Self.signature(of: assets))
+        generation += 1
+        let ticket = generation
+        let (fetch, assets, nearby, signature) = await Task.detached(priority: .userInitiated) {
+            let (fetch, assets) = Self.fetchWatched(for: date)
+            return (fetch, assets, assets.isEmpty ? Self.fetchNearby(for: date) : [], Self.signature(of: assets))
         }.value
+        guard ticket == generation else { return }
+        watched.withLockUnchecked { $0 = fetch }
         // Photos reports changes almost continuously while iCloud syncs — and
         // the app's own iCloud downloads (scoring, the widget) cause more.
         // Publishing each one redrew the whole grid every half second, which
@@ -3129,11 +3208,10 @@ final class MemoriesViewModel: NSObject, ObservableObject, PHPhotoLibraryChangeO
 
     /// `fetchMemories`, remembering the fetch so changes can be checked
     /// against it.
-    private nonisolated func fetchWatched(for date: Date) -> [PHAsset] {
-        let results = Self.fetchResult(for: date)
-        watched.withLockUnchecked { $0 = results }
-        guard let results, results.count > 0 else { return [] }
-        return results.objects(at: IndexSet(integersIn: 0..<results.count))
+    private nonisolated static func fetchWatched(for date: Date) -> (PHFetchResult<PHAsset>?, [PHAsset]) {
+        let results = fetchResult(for: date)
+        guard let results, results.count > 0 else { return (results, []) }
+        return (results, results.objects(at: IndexSet(integersIn: 0..<results.count)))
     }
 
     nonisolated static func fetchMemories(for date: Date) -> [PHAsset] {
